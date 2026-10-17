@@ -1,0 +1,16 @@
+{
+  "name": "highpass",
+  "version": 1,
+  "engine": "sox (SoX_ng 14.8.0.1)",
+  "description": "High-pass filter via sox highpass. Default -2 (2-pole Butterworth-ish); use poles=1 for a gentle 6 dB/oct slope.",
+  "defaults": {
+    "freq_hz": 80,
+    "poles": 2
+  },
+  "params": {
+    "freq_hz": "cutoff frequency Hz, 10..20000 (default 80)",
+    "poles": "1|2 poles (default 2)",
+    "out_format": "flac|wav (default: input format; sox recipes do not write mp3)"
+  },
+  "safety": "writes a NEW output under <input dir>/renders/; never overwrites the input"
+}

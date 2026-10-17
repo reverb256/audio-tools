@@ -1,0 +1,17 @@
+{
+  "name": "convert",
+  "version": 1,
+  "engine": "sox (SoX_ng 14.8.0.1)",
+  "description": "Format / sample-rate / bit-depth conversion via sox. CLI order is load-bearing: output format options (-b) go before the outfile, the rate effect comes last (validated live during the build).",
+  "defaults": {
+    "format": null,
+    "sample_rate": null,
+    "bits": null
+  },
+  "params": {
+    "format": "flac|wav (default: input format)",
+    "sample_rate": "target sample rate Hz, 8000..192000 (default: keep)",
+    "bits": "8|16|24|32 output bit depth (default: sox default for the target format)"
+  },
+  "safety": "writes a NEW output under <input dir>/renders/; never overwrites the input"
+}

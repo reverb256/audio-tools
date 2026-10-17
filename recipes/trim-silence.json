@@ -1,0 +1,18 @@
+{
+  "name": "trim-silence",
+  "version": 1,
+  "engine": "ffmpeg (silenceremove filter)",
+  "description": "Trim leading and/or trailing silence. SoX_ng 14.8.0.1 has NO silenceremove effect (the name is an ffmpeg filter), so this recipe uses ffmpeg silenceremove; the tail trim runs through an areverse sandwich so only the file ends are touched, never interior quiet passages.",
+  "defaults": {
+    "threshold_db": -50.0,
+    "min_silence_s": 0.1,
+    "mode": "both"
+  },
+  "params": {
+    "threshold_db": "silence threshold, -80..-20 dB (default -50)",
+    "min_silence_s": "detection window in seconds, 0.01..5 (default 0.1; the filter also drops up to this much of the first/last non-silent audio - inherent behavior)",
+    "mode": "start|end|both (default both)",
+    "out_format": "flac|wav|mp3 (default: input format)"
+  },
+  "safety": "writes a NEW output under <input dir>/renders/; never overwrites the input"
+}

@@ -1,0 +1,14 @@
+{
+  "name": "normalize-peak",
+  "version": 1,
+  "engine": "sox (SoX_ng 14.8.0.1)",
+  "description": "Sample-peak normalization to a target dBFS via sox norm. This is a gain change only - it does NOT limit; check true peak afterwards (audio_qc) before treating the result as release-safe.",
+  "defaults": {
+    "target_dbfs": -1.0
+  },
+  "params": {
+    "target_dbfs": "peak target in dBFS, -30..0 (default -1.0)",
+    "out_format": "flac|wav (default: input format; sox recipes do not write mp3)"
+  },
+  "safety": "writes a NEW output under <input dir>/renders/; never overwrites the input"
+}

@@ -1,0 +1,10 @@
+# Pinned uv environments (rebuildable: see README; never commit venvs)
+envs/
+# Shallow design-reference clones (third-party repos with their own .git)
+reference/
+# Stem job records, logs and outputs (per-job; regenerable)
+jobs/
+# Test artifacts from mcp/test_client.py (clips, renders, qc receipts)
+mcp/.test-artifacts/
+__pycache__/
+*.pyc

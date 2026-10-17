@@ -1,0 +1,18 @@
+{
+  "name": "loudnorm-2pass",
+  "version": 1,
+  "engine": "ffmpeg",
+  "description": "Two-pass EBU R128 loudness normalization: pass 1 measures the input with print_format=json, pass 2 applies the measured values with linear=true, then the output is RE-MEASURED and the reported normalization mode is inspected (ffmpeg loudnorm silently falls back to dynamic when the requested change would exceed the true-peak ceiling).",
+  "defaults": {
+    "target_lufs": -14.0,
+    "target_tp": -1.0,
+    "target_lra": 11.0
+  },
+  "params": {
+    "target_lufs": "integrated loudness target, -70..-5 (default -14.0; this is a PLAYBACK target, not a distributor requirement)",
+    "target_tp": "true-peak ceiling, -9..0 dBTP (default -1.0 = streaming headroom)",
+    "target_lra": "loudness range target, 1..50 LU (default 11)",
+    "out_format": "flac|wav|mp3 (default: input format)"
+  },
+  "safety": "writes a NEW output under <input dir>/renders/; never overwrites the input"
+}

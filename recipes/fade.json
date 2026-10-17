@@ -1,0 +1,18 @@
+{
+  "name": "fade",
+  "version": 1,
+  "engine": "sox (SoX_ng 14.8.0.1)",
+  "description": "Fade in and/or out. sox fade semantics: stop-position is where the audio is cut and the fade-out occupies [stop-position - fade_out_s, stop-position]; this recipe passes stop-position = file duration so the fade ends exactly at EOF and nothing is discarded.",
+  "defaults": {
+    "fade_in_s": 0.5,
+    "fade_out_s": 0.5,
+    "curve": "t"
+  },
+  "params": {
+    "fade_in_s": "fade-in length seconds, 0..3600 (0 = skip)",
+    "fade_out_s": "fade-out length seconds, 0..3600 (0 = skip)",
+    "curve": "t|q|h|l|p|s (linear/quarter/half/log/parabola/square-law; default t)",
+    "out_format": "flac|wav (default: input format; sox recipes do not write mp3)"
+  },
+  "safety": "writes a NEW output under <input dir>/renders/; never overwrites the input"
+}
