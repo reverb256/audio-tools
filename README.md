@@ -13,6 +13,8 @@ the miner-handoff queue if a windowed need ever appears.
 - `recipes/`    — versioned DSP recipes as DATA (JSON defaults + docs; ranges validated in code, unknown params rejected)
 - `mcp/`        — the `audio` stdio MCP server (see the MCP section below)
 - `djmix/`     — cue-sheet DJ-mix renderer (see the djmix section below)
+- `mixgen/`    — plan-driven pipeline: generate takes → QA → master → djmix mix
+- `examples/`  — example cue sheets and mix plans (`lightworld-relay.plan.yaml`)
 - `jobs/`       — stem job records / logs / outputs (runtime; gitignored)
 - `reference/`  — shallow clones for design reference only (third-party repos; never run)
 
@@ -136,6 +138,95 @@ Tests: `envs/cpu/bin/python -m pytest -q tests` renders two synthetic click trac
 10 ms of the shared grid through the blend, for both stretch engines; plus a ramped
 bass-swap and a full 48k/24-bit/loudness render. A 60 min render needs ~3 GB RAM and runs
 single-threaded, one track at a time.
+
+## mixgen — generate → QA → master → mix (`mixgen/`)
+
+One plan YAML drives a whole mix: N takes per track from a generation backend, QA
+that picks the best take, loudnorm mastering, and a djmix cue sheet/render with
+tracklist, MP3 and YouTube chapters. Every stage is resumable (an existing output
+is skipped unless `--force`) and every write is atomic (temp path + rename).
+
+```bash
+python -m mixgen examples/lightworld-relay.plan.yaml --root /music --dry-run
+python -m mixgen examples/lightworld-relay.plan.yaml --root /music --backend fake
+python -m mixgen plan.yaml --stages qa,master,mix --force     # rerun a subset
+```
+
+The console entry `mixgen` (pyproject `[project.scripts]`) is equivalent when the
+package is installed.
+
+**Plan format** (`examples/lightworld-relay.plan.yaml` is a full 12-track plan):
+
+```yaml
+title: My Mix
+slug: my-mix                    # optional; derived from title
+output: mixes/my-mix            # dir under --root (default /music)
+sample_rate: 48000
+phrase_bars: 16                 # 16 or 32
+takes: 3                        # default takes per track
+backend: acestep                # acestep | fake (CLI --backend overrides)
+acestep:
+  wrapper: gpu-music-job
+  poll_interval: 30             # seconds between NFS output polls
+  # timeout: 7200               # optional; omitted = poll forever
+  token_env: MIXGEN_ACESTEP_TOKEN
+tracks:
+  - title: Track One
+    slug: track-one             # optional; derived from title
+    style: "deep house, 120 BPM, A minor. ..."   # backend prompt, verbatim
+    bpm: 120
+    key: 8A                     # Camelot
+    duration: "5:20"            # mm:ss, hh:mm:ss or seconds
+    instrumental: true          # or: lyrics: "..."
+    takes: 3
+    job: {kind: gpu, host: sentry}   # kind: cpu|gpu, host: nexus|sentry
+    play_bars: 160              # optional djmix cue fields
+    mix_in_bars: 32             # default 32 (0 for the first track / a cut)
+    transition: long_blend      # long_blend | eq_bass_swap | filter_sweep | cut
+    ramp: true                  # default true
+```
+
+Any other job host (e.g. `forge`) or job kind is rejected at validation, as is any
+path that resolves outside `--root` (`..`, absolute paths, symlinked parents).
+Per-track paths are derived: takes at `gen/<mix>/<track>/take-N.wav`, QA and
+mastered files under the output dir.
+
+**Stages** (`--stages gen,qa,master,mix`, canonical order):
+
+1. `gen` — `takes` files per track through the backend. `acestep` submits a
+   `gpu-music-job` and polls `<root>/gen/<mix>/<track>/take-N`; `fake` synthesises
+   a WAV (kick on the beat at the target BPM, a tonic-triad pad in the target key,
+   16-bar drums-only intro/outro) for tests and offline runs.
+2. `qa` — per take: tempo (librosa + comb fit, half/double folded), key (chroma +
+   Krumhansl → Camelot, measured on the harmonic body), length, drums-only
+   intro/outro ≥ 16 bars (HPSS harmonic vs percussive energy), clipping and
+   silence. Weighted score; best take becomes the pick. Writes
+   `qa/<track>/report.{json,md}` and `qa/summary.json`.
+3. `master` — each pick through djmix's two-pass loudnorm chain (default
+   −9 LUFS / −1 dBTP) into `mastered/<track>.wav`.
+4. `mix` — writes a djmix cue sheet from the plan, renders the WAV with djmix
+   (`--root` is passed through), then a 320k MP3, a timestamped tracklist and
+   YouTube chapter text (first chapter at 0:00). Timestamps are bar/BPM/overlap
+   maths, including tempo ramps and the `cut` case.
+
+`--dry-run` prints every stage and, per track/take, the input, output and
+skip/run decision. It never generates, renders or calls a backend, and works with
+no audio present.
+
+**ACE-Step backend config.** Generation runs through the `gpu-music-job` wrapper
+(CPU-job style, k8s `music` namespace) for ACE-Step v1.5 XL; output lands on the
+music-library NFS path above. The field→flag mapping lives only in
+`mixgen/backends/acestep_flags.py` (`FIELD_FLAGS` + `build_argv()`) with a TODO
+until the wrapper's real submit flags are published. Configuration comes from the
+plan's `acestep:` block or environment (env wins): `MIXGEN_ACESTEP_WRAPPER`
+(default `gpu-music-job`), `MIXGEN_ACESTEP_COMMAND` (full argv template with
+`{prompt} {lyrics} {instrumental} {duration} {bpm} {key} {seed} {takes} {out}`),
+`MIXGEN_ACESTEP_POLL_INTERVAL`, `MIXGEN_ACESTEP_TIMEOUT`. No secrets live in the
+repo: `token_env` names the env var the wrapper itself reads.
+
+Tests: `python -m pytest -q tests/test_mixgen.py` (synthetic audio; QA ranking,
+Camelot conversion, cue bar/timestamp/chapter maths, plan validation, resumability,
+acestep argv + poller with a fake submitter, and a dry run of the example plan).
 
 ## Next
 1. ~~Build the `audio-tools` MCP server (stdio)~~ — **done** (`mcp/`, 5 tools, registered as `audio`; restart/new session for pickup).

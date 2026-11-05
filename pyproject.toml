@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "audio-tools-mixgen"
+version = "0.1.0"
+description = "Plan-driven track generation, QA, mastering and DJ-mix assembly"
+requires-python = ">=3.11"
+dependencies = ["numpy", "soundfile", "scipy", "librosa", "pyyaml"]
+
+[project.scripts]
+mixgen = "mixgen.cli:main"
+
+[tool.setuptools]
+packages = ["mixgen", "mixgen.backends", "djmix"]
