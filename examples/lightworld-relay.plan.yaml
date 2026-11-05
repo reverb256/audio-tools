@@ -1,0 +1,188 @@
+# Lightworld Relay — 12 original tracks, deep house -> trance, 61:19 continuous mix.
+# Paths are relative to --root (default /music). Generation jobs go to zephyr's
+# 3090 through the gpu-music-job wrapper (acestep backend).
+#
+# Style prompts are the ones written for this mix. Cue fields follow the plan's
+# cue table: 32-bar phrase blends with tempo ramps, except track 11, which is a
+# deliberate hard cut into the breakdown (mix_in_bars: 0, transition: cut).
+title: Lightworld Relay
+slug: lightworld-relay
+output: mixes/lightworld-relay
+sample_rate: 48000
+phrase_bars: 16
+takes: 3
+backend: acestep
+acestep:
+  wrapper: gpu-music-job
+  poll_interval: 30
+  # timeout: 7200        # seconds; omitted = poll until the take appears
+  token_env: MIXGEN_ACESTEP_TOKEN
+
+tracks:
+  - title: Heliostat Dawn
+    slug: heliostat-dawn
+    style: "deep house, 120 BPM, A minor. warm sub-bass, dusty Rhodes chords, soft shaker, tape hiss, spacious mix, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
+    bpm: 120
+    key: 8A
+    duration: "5:20"
+    instrumental: true
+    takes: 3
+    job: {kind: gpu, host: sentry}
+    play_bars: 160
+    mix_in_bars: 0
+    transition: long_blend
+    ramp: false
+
+  - title: Tidal Optics
+    slug: tidal-optics
+    style: "deep house, 121 BPM, A minor. rubbery sub-bass, filtered chord stabs, rim clicks, vinyl texture, hypnotic 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
+    bpm: 121
+    key: 8A
+    duration: "5:17"
+    instrumental: true
+    takes: 3
+    job: {kind: gpu, host: sentry}
+    play_bars: 160
+    mix_in_bars: 32
+    transition: eq_bass_swap
+    ramp: true
+
+  - title: Glasshouse Orbit
+    slug: glasshouse-orbit
+    style: "deep house, 122 BPM, E minor. offbeat plucked bass, shaker 16ths, glassy pads, warm analog kick, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
+    bpm: 122
+    key: 9A
+    duration: "5:46"
+    instrumental: true
+    takes: 3
+    job: {kind: gpu, host: sentry}
+    play_bars: 176
+    mix_in_bars: 32
+    transition: long_blend
+    ramp: true
+
+  - title: Slow Photon
+    slug: slow-photon
+    style: "deep progressive house, 124 BPM, E minor. rolling sub-bass, delayed minor chords, congas, airy reverb, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
+    bpm: 124
+    key: 9A
+    duration: "6:11"
+    instrumental: true
+    takes: 3
+    job: {kind: gpu, host: sentry}
+    play_bars: 192
+    mix_in_bars: 32
+    transition: long_blend
+    ramp: true
+
+  - title: Meridian Drift
+    slug: meridian-drift
+    style: "progressive house, 125 BPM, B minor. pushing offbeat bass, 16th-note arpeggio, open hats, wide pads, no lead melody, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
+    bpm: 125
+    key: 10A
+    duration: "6:08"
+    instrumental: true
+    takes: 3
+    job: {kind: gpu, host: sentry}
+    play_bars: 192
+    mix_in_bars: 32
+    transition: eq_bass_swap
+    ramp: true
+
+  - title: Lamptree Canopy
+    slug: lamptree-canopy
+    style: "progressive house, 126 BPM, D major. warm major-key chords, plucked arp, rolling bass, bright shakers, hopeful lift, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
+    bpm: 126
+    key: 10B
+    duration: "6:05"
+    instrumental: true
+    takes: 3
+    job: {kind: gpu, host: sentry}
+    play_bars: 192
+    mix_in_bars: 32
+    transition: filter_sweep
+    ramp: true
+
+  - title: Aurora Lift
+    slug: aurora-lift
+    style: "progressive trance, 128 BPM, A major. long filter sweeps, first supersaw pads, driving rolling bass, snare build, euphoric, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
+    bpm: 128
+    key: 11B
+    duration: "6:30"
+    instrumental: true
+    takes: 3
+    job: {kind: gpu, host: sentry}
+    play_bars: 208
+    mix_in_bars: 32
+    transition: filter_sweep
+    ramp: true
+
+  - title: Prism Ascender
+    slug: prism-ascender
+    style: "progressive trance, 128 BPM, F# minor. gated supersaw stabs, pulsing bass, rising arp, tension riser, airy vocal chop, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
+    bpm: 128
+    key: 11A
+    duration: "6:00"
+    instrumental: true
+    takes: 3
+    job: {kind: gpu, host: sentry}
+    play_bars: 192
+    mix_in_bars: 32
+    transition: long_blend
+    ramp: false
+
+  - title: Ion Bloom
+    slug: ion-bloom
+    style: "uplifting trance, 130 BPM, C# minor. soaring supersaw lead, rolling 16th bass, big snare rolls, euphoric peak, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
+    bpm: 130
+    key: 12A
+    duration: "5:54"
+    instrumental: true
+    takes: 3
+    job: {kind: gpu, host: sentry}
+    play_bars: 192
+    mix_in_bars: 32
+    transition: eq_bass_swap
+    ramp: true
+
+  - title: Corona Choir
+    slug: corona-choir
+    style: "uplifting trance, 132 BPM, E major. wordless choir pads, anthemic supersaw lead, galloping bass, huge drop, bright, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
+    bpm: 132
+    key: 12B
+    duration: "6:18"
+    instrumental: true
+    takes: 3
+    job: {kind: gpu, host: sentry}
+    play_bars: 208
+    mix_in_bars: 32
+    transition: long_blend
+    ramp: true
+
+  - title: Afterglow Relay
+    slug: afterglow-relay
+    style: "progressive trance breakdown, 130 BPM, C# minor. no drums first 32 bars, lush pads, breathy vocal chop, long riser, 32-bar drums-only outro, no fade-out, instrumental"
+    bpm: 130
+    key: 12A
+    duration: "5:24"
+    instrumental: true
+    takes: 3
+    job: {kind: gpu, host: sentry}
+    play_bars: 176
+    mix_in_bars: 0        # cut: the schema forces 0 for transition: cut
+    transition: cut
+    ramp: false
+
+  - title: Last Light Home
+    slug: last-light-home
+    style: "melodic trance, 128 BPM, F# minor. main melody restated on piano then supersaw, warm pads, drums thin out, hard ending, 16-bar drums-only intro, no fade-out, instrumental"
+    bpm: 128
+    key: 11A
+    duration: "6:30"
+    instrumental: true
+    takes: 3
+    job: {kind: gpu, host: sentry}
+    play_bars: 208
+    mix_in_bars: 32
+    transition: long_blend
+    ramp: true
