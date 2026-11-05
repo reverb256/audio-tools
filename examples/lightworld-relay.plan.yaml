@@ -77,8 +77,7 @@ tracks:
 
   - title: Meridian Drift
     slug: meridian-drift
-    # TODO(music): placeholder; the original Style line was missing from the handoff plan.md. Replace verbatim.
-    style: "progressive house, 125 BPM, B minor. 16th-note arp, open hi-hats, driving sub-bass, evolving wide pads, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
+    style: "progressive house, 125 BPM, B minor. pushing offbeat bass, 16th-note arpeggio, open hats, wide pads, no lead melody, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
     bpm: 125
     key: 10A
     duration: "6:08"
@@ -92,8 +91,7 @@ tracks:
 
   - title: Lamptree Canopy
     slug: lamptree-canopy
-    # TODO(music): placeholder; the original Style line was missing from the handoff plan.md. Replace verbatim.
-    style: "progressive house, 126 BPM, D major. rolling plucked bass, warm major-key pads, arpeggiated chords, leafy reverb tails, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
+    style: "progressive house, 126 BPM, D major. warm major-key chords, plucked arp, rolling bass, bright shakers, hopeful lift, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
     bpm: 126
     key: 10B
     duration: "6:05"
@@ -107,8 +105,7 @@ tracks:
 
   - title: Aurora Lift
     slug: aurora-lift
-    # TODO(music): placeholder; the original Style line was missing from the handoff plan.md. Replace verbatim.
-    style: "progressive trance, 128 BPM, A major. supersaw pads, long filter sweeps, arpeggiated lead, crystalline highs, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
+    style: "progressive trance, 128 BPM, A major. long filter sweeps, first supersaw pads, driving rolling bass, snare build, euphoric, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
     bpm: 128
     key: 11B
     duration: "6:30"
@@ -122,8 +119,7 @@ tracks:
 
   - title: Prism Ascender
     slug: prism-ascender
-    # TODO(music): placeholder; the original Style line was missing from the handoff plan.md. Replace verbatim.
-    style: "progressive trance, 128 BPM, F# minor. layered supersaws, prismatic arps, rolling bass, bright open hats, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
+    style: "progressive trance, 128 BPM, F# minor. gated supersaw stabs, pulsing bass, rising arp, tension riser, airy vocal chop, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
     bpm: 128
     key: 11A
     duration: "6:00"
@@ -137,8 +133,7 @@ tracks:
 
   - title: Ion Bloom
     slug: ion-bloom
-    # TODO(music): placeholder; the original Style line was missing from the handoff plan.md. Replace verbatim.
-    style: "peak-time trance, 130 BPM, C# minor. full melodic statement, ion-bloom lead, sidechained bass, bright hats, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
+    style: "uplifting trance, 130 BPM, C# minor. soaring supersaw lead, rolling 16th bass, big snare rolls, euphoric peak, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
     bpm: 130
     key: 12A
     duration: "5:54"
@@ -152,8 +147,7 @@ tracks:
 
   - title: Corona Choir
     slug: corona-choir
-    # TODO(music): placeholder; the original Style line was missing from the handoff plan.md. Replace verbatim.
-    style: "peak-time trance, 132 BPM, E major. choir-like pads, driving kick, euphoric lead, wide stereo mix, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
+    style: "uplifting trance, 132 BPM, E major. wordless choir pads, anthemic supersaw lead, galloping bass, huge drop, bright, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
     bpm: 132
     key: 12B
     duration: "6:18"
@@ -181,8 +175,7 @@ tracks:
 
   - title: Last Light Home
     slug: last-light-home
-    # TODO(music): placeholder; the original Style line was missing from the handoff plan.md. Replace verbatim.
-    style: "melodic trance outro, 128 BPM, F# minor. soft lead restatement, thinning drums, dusk pads, hard ending, 16-bar drums-only intro, 32-bar drums-only outro, no fade-out, instrumental"
+    style: "melodic trance, 128 BPM, F# minor. main melody restated on piano then supersaw, warm pads, drums thin out, hard ending, 16-bar drums-only intro, no fade-out, instrumental"
     bpm: 128
     key: 11A
     duration: "6:30"
