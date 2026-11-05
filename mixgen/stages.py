@@ -20,7 +20,8 @@ from mixgen.plan import Plan, PlanError
 from mixgen.qa import qa_track
 from mixgen.util import atomic_write_json, fmt_hms
 
-STAGES = ("gen", "qa", "master", "mix")
+STAGES = ("gen", "qa", "master", "stems", "mix")
+DEFAULT_STAGES = ("gen", "qa", "master", "mix")
 
 
 def parse_stages(value: str) -> list[str]:
@@ -51,10 +52,11 @@ def pick_path(plan: Plan, track) -> Path | None:
 
 # ------------------------------------------------------------------ gen
 def run_gen(plan: Plan, backend_name: str, force: bool, log=print) -> dict:
-    backend = make_backend(plan, backend_name)
+    backend = make_backend(plan, backend_name, log=log)
     made = skipped = 0
     for track in plan.tracks:
         log(f"  [{track.index + 1}/{len(plan.tracks)}] {track.title} ({track.slug})")
+        targets: list[tuple[int, Path]] = []
         for n in range(1, track.takes + 1):
             dst = plan.take_path(track, n)
             if dst.exists() and not force:
@@ -62,17 +64,23 @@ def run_gen(plan: Plan, backend_name: str, force: bool, log=print) -> dict:
                 log(f"    take-{n}: skip ({dst})")
                 continue
             dst.parent.mkdir(parents=True, exist_ok=True)
-            tmp = dst.with_name(dst.stem + ".tmp" + dst.suffix)
-            try:
-                backend.generate(track, n, tmp)
+            targets.append((n, dst.with_name(dst.stem + ".tmp" + dst.suffix)))
+        if not targets:
+            continue
+        try:
+            # one job per track: --takes N is a batch, not one job per take
+            backend.generate_track(track, targets, force=force)
+            for n, tmp in targets:
+                dst = plan.take_path(track, n)
                 os.replace(tmp, dst)
-            finally:
+                made += 1
+                log(f"    take-{n}: wrote {dst}")
+        finally:
+            for _n, tmp in targets:
                 try:
                     tmp.unlink()
                 except FileNotFoundError:
                     pass
-            made += 1
-            log(f"    take-{n}: wrote {dst}")
     return {"generated": made, "skipped": skipped, "backend": backend_name}
 
 
@@ -142,6 +150,39 @@ def run_master(plan: Plan, force: bool, log=print) -> dict:
     return {"mastered": made, "skipped": skipped}
 
 
+# ------------------------------------------------------------------ stems (opt-in)
+def run_stems(plan: Plan, force: bool, log=print) -> dict:
+    """Optional ``gpu-music-job demucs`` step; never runs unless selected."""
+    cfg = plan.stems or {}
+    if not cfg.get("enabled"):
+        raise PlanError(
+            "the stems stage is opt-in: add a top-level 'stems: {enabled: true}' block "
+            "to the plan (optional: model: htdemucs)")
+    from mixgen.backends.acestep import AceStepBackend
+
+    backend = AceStepBackend(plan, log=log)
+    model = cfg.get("model") or None
+    made = skipped = 0
+    for track in plan.tracks:
+        src = pick_path(plan, track)
+        if src is None:
+            raise PlanError(
+                f"stems: no QA pick for '{track.title}' — run the qa stage first")
+        rel = str(Path(src).relative_to(plan.gen_root)) if Path(src).is_relative_to(plan.gen_root) \
+            else str(Path(src).relative_to(plan.root))
+        out_rel = plan.stems_rel(track)
+        result_path = plan.stems_dir(track) / "job-result.json"
+        if result_path.exists() and not force:
+            skipped += 1
+            log(f"  [{track.index + 1}/{len(plan.tracks)}] {track.title}: skip "
+                f"({result_path})")
+            continue
+        log(f"  [{track.index + 1}/{len(plan.tracks)}] {track.title}: demucs {rel} -> {out_rel}")
+        backend.demucs(rel, out_rel, model=model, force=force)
+        made += 1
+    return {"separated": made, "skipped": skipped, "model": model or "htdemucs"}
+
+
 # ------------------------------------------------------------------ mix
 def _ffmpeg() -> str:
     return os.environ.get("DJMIX_FFMPEG") or os.environ.get("MIXGEN_FFMPEG") or "ffmpeg"
@@ -193,11 +234,13 @@ def dry_run(plan: Plan, stages: list[str], backend_name: str, force: bool, log=p
     log("")
     if "gen" in stages:
         n_takes = sum(t.takes for t in plan.tracks)
-        log(f"gen: backend={backend_name}, {len(plan.tracks)} tracks, {n_takes} takes")
+        log(f"gen: backend={backend_name}, {len(plan.tracks)} tracks, "
+            f"{n_takes} takes (one job per track)")
         for track in plan.tracks:
             log(f"  [{track.index + 1}/{len(plan.tracks)}] {track.title} ({track.slug}) "
                 f"job={track.job} bpm={track.bpm:g} key={track.key} "
-                f"dur={fmt_hms(track.duration)} takes={track.takes}")
+                f"dur={fmt_hms(track.duration)} takes={track.takes} "
+                f"out-relpath={plan.track_gen_rel(track)}")
             log(f"    style: {track.style}")
             if track.lyrics:
                 log(f"    lyrics: {track.lyrics!r}")
@@ -212,7 +255,7 @@ def dry_run(plan: Plan, stages: list[str], backend_name: str, force: bool, log=p
             state = _skip_run(plan.qa_report_path(track).exists() and not force)
             pick = rep["pick"] if rep else "(pending)"
             log(f"  [{track.index + 1}/{len(plan.tracks)}] {track.title}: {state} "
-                f"in={plan.track_gen_dir(track)}/take-*.wav "
+                f"in={plan.track_gen_dir(track)}/take-*.flac "
                 f"report={plan.qa_report_path(track)} pick={pick}")
     if "master" in stages:
         log(f"master: {len(plan.tracks)} picks -> loudnorm {plan.target_lufs:g} LUFS / {plan.target_tp:g} dBTP")
@@ -222,6 +265,17 @@ def dry_run(plan: Plan, stages: list[str], backend_name: str, force: bool, log=p
             src = pick_path(plan, track)
             log(f"  [{track.index + 1}/{len(plan.tracks)}] {track.title}: {state} "
                 f"{src if src else '(qa pick)'} -> {dst}")
+    if "stems" in stages:
+        cfg = plan.stems or {}
+        model = cfg.get("model") or "htdemucs"
+        enabled = bool(cfg.get("enabled"))
+        log(f"stems: {'RUN' if enabled else 'DISABLED'} demucs model={model} "
+            f"(opt-in; add 'stems: {{enabled: true}}' to the plan)")
+        for track in plan.tracks:
+            out = plan.stems_dir(track)
+            state = _skip_run(enabled and (out / "job-result.json").exists() and not force)
+            log(f"  [{track.index + 1}/{len(plan.tracks)}] {track.title}: {state} "
+                f"in-relpath={plan.track_gen_rel(track)} out-relpath={plan.stems_rel(track)}")
     if "mix" in stages:
         log(f"mix: cue={plan.cue_path()}")
         log(f"  wav: {_skip_run(plan.mix_wav().exists() and not force)} {plan.mix_wav()}")
@@ -258,6 +312,9 @@ def run(plan: Plan, stages: list[str], backend_name: str | None = None,
     if "master" in stages:
         log("master:")
         report["master"] = run_master(plan, force, log)
+    if "stems" in stages:
+        log("stems:")
+        report["stems"] = run_stems(plan, force, log)
     if "mix" in stages:
         log("mix:")
         report["mix"] = run_mix(plan, force, log)

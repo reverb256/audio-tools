@@ -19,7 +19,7 @@ import yaml
 
 TRANSITIONS = ("long_blend", "eq_bass_swap", "filter_sweep", "cut")
 JOB_KINDS = ("cpu", "gpu")
-JOB_HOSTS = ("nexus", "sentry")
+JOB_HOSTS = ("nexus", "zephyr")
 DEFAULT_ROOT = "/music"
 DEFAULT_TAKES = 3
 DEFAULT_PHRASE_BARS = 16
@@ -32,7 +32,7 @@ _NUM_RE = re.compile(r"\d+(?:\.\d+)?")
 _TOP_KEYS = {
     "title", "slug", "output", "sample_rate", "phrase_bars", "beats_per_bar",
     "takes", "backend", "gen", "acestep", "target_lufs", "target_tp", "tracks",
-    "root",
+    "root", "stems",
 }
 _TRACK_KEYS = {
     "title", "slug", "style", "bpm", "key", "duration", "instrumental", "lyrics",
@@ -167,17 +167,34 @@ class Plan:
     target_tp: float = -1.0
     backend: str | None = None
     acestep: dict = field(default_factory=dict)
+    stems: dict = field(default_factory=dict)
 
     # ---- paths -------------------------------------------------------
+    @property
+    def gen_root(self) -> Path:
+        return resolve_under(self.root, "gen", "gen root")
+
     @property
     def gen_dir(self) -> Path:
         return resolve_under(self.root, Path("gen") / self.slug, "gen dir")
 
+    def track_gen_rel(self, track: Track) -> str:
+        """Job ``--out-relpath`` prefix for a track: ``<mix>/<track>``."""
+        return f"{self.slug}/{track.slug}"
+
     def track_gen_dir(self, track: Track) -> Path:
-        return resolve_under(self.root, Path("gen") / self.slug / track.slug, "track gen dir")
+        return resolve_under(self.root, Path("gen") / self.track_gen_rel(track), "track gen dir")
 
     def take_path(self, track: Track, take_idx: int) -> Path:
-        return self.track_gen_dir(track) / f"take-{take_idx}.wav"
+        """Local take path; the job output is FLAC by default."""
+        return self.track_gen_dir(track) / f"take-{take_idx}.flac"
+
+    def stems_rel(self, track: Track) -> str:
+        """Job ``--out-relpath`` for the optional stems step: ``<mix>/<track>-stems``."""
+        return f"{self.slug}/{track.slug}-stems"
+
+    def stems_dir(self, track: Track) -> Path:
+        return resolve_under(self.root, Path("gen") / self.stems_rel(track), "stems dir")
 
     @property
     def qa_dir(self) -> Path:
@@ -235,6 +252,8 @@ def _check_job(index: int, raw) -> Job:
         raise PlanError(f"track {index}: job.kind must be one of {JOB_KINDS}, got {raw.get('kind')!r}")
     if host not in JOB_HOSTS:
         raise PlanError(f"track {index}: job.host must be one of {JOB_HOSTS}, got {raw.get('host')!r}")
+    if kind == "gpu" and host != "zephyr":
+        raise PlanError(f"track {index}: gpu jobs target gpu@zephyr only, got gpu@{host}")
     return Job(kind=kind, host=host)
 
 
@@ -335,6 +354,13 @@ def load_plan(path: str | Path, root: str | Path | None = None) -> Plan:
     acestep = data.get("acestep") or {}
     if not isinstance(acestep, dict):
         raise PlanError("'acestep' must be a mapping")
+    stems = data.get("stems") or {}
+    if not isinstance(stems, dict):
+        raise PlanError("'stems' must be a mapping")
+    unknown = set(stems) - {"enabled", "model"}
+    if unknown:
+        raise PlanError(f"unknown 'stems' keys {sorted(unknown)} (allowed: enabled, model)")
+
     backend = data.get("backend") or (data.get("gen") or {}).get("backend")
     if backend is not None:
         backend = str(backend)
@@ -347,6 +373,7 @@ def load_plan(path: str | Path, root: str | Path | None = None) -> Plan:
         target_lufs=float(data.get("target_lufs", -9.0)),
         target_tp=float(data.get("target_tp", -1.0)),
         backend=backend, acestep=acestep,
+        stems=stems,
     )
 
 
