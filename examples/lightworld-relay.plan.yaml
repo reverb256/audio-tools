@@ -15,8 +15,14 @@ backend: acestep
 acestep:
   wrapper: gpu-music-job
   poll_interval: 30
-  # timeout: 7200        # seconds; omitted = poll until the take appears
-  token_env: MIXGEN_ACESTEP_TOKEN
+  # Each track is one gpu-music-job 'acestep' job (--takes 3, a batch). Output is
+  # a flat dir: /music/gen/<mix>/<track>/ (FLAC + job-request.json/job-result.json).
+  # A job is done when job-result.json exists; gpu-music-job status <job-name> is
+  # used for progress. There is no token/auth.
+# Opt-in stems step, only run with --stages ...,stems:
+# stems:
+#   enabled: true
+#   model: htdemucs
 
 tracks:
   - title: Heliostat Dawn
@@ -27,7 +33,7 @@ tracks:
     duration: "5:20"
     instrumental: true
     takes: 3
-    job: {kind: gpu, host: sentry}
+    job: {kind: gpu, host: zephyr}
     play_bars: 160
     mix_in_bars: 0
     transition: long_blend
@@ -41,7 +47,7 @@ tracks:
     duration: "5:17"
     instrumental: true
     takes: 3
-    job: {kind: gpu, host: sentry}
+    job: {kind: gpu, host: zephyr}
     play_bars: 160
     mix_in_bars: 32
     transition: eq_bass_swap
@@ -55,7 +61,7 @@ tracks:
     duration: "5:46"
     instrumental: true
     takes: 3
-    job: {kind: gpu, host: sentry}
+    job: {kind: gpu, host: zephyr}
     play_bars: 176
     mix_in_bars: 32
     transition: long_blend
@@ -69,7 +75,7 @@ tracks:
     duration: "6:11"
     instrumental: true
     takes: 3
-    job: {kind: gpu, host: sentry}
+    job: {kind: gpu, host: zephyr}
     play_bars: 192
     mix_in_bars: 32
     transition: long_blend
@@ -83,7 +89,7 @@ tracks:
     duration: "6:08"
     instrumental: true
     takes: 3
-    job: {kind: gpu, host: sentry}
+    job: {kind: gpu, host: zephyr}
     play_bars: 192
     mix_in_bars: 32
     transition: eq_bass_swap
@@ -97,7 +103,7 @@ tracks:
     duration: "6:05"
     instrumental: true
     takes: 3
-    job: {kind: gpu, host: sentry}
+    job: {kind: gpu, host: zephyr}
     play_bars: 192
     mix_in_bars: 32
     transition: filter_sweep
@@ -111,7 +117,7 @@ tracks:
     duration: "6:30"
     instrumental: true
     takes: 3
-    job: {kind: gpu, host: sentry}
+    job: {kind: gpu, host: zephyr}
     play_bars: 208
     mix_in_bars: 32
     transition: filter_sweep
@@ -125,7 +131,7 @@ tracks:
     duration: "6:00"
     instrumental: true
     takes: 3
-    job: {kind: gpu, host: sentry}
+    job: {kind: gpu, host: zephyr}
     play_bars: 192
     mix_in_bars: 32
     transition: long_blend
@@ -139,7 +145,7 @@ tracks:
     duration: "5:54"
     instrumental: true
     takes: 3
-    job: {kind: gpu, host: sentry}
+    job: {kind: gpu, host: zephyr}
     play_bars: 192
     mix_in_bars: 32
     transition: eq_bass_swap
@@ -153,7 +159,7 @@ tracks:
     duration: "6:18"
     instrumental: true
     takes: 3
-    job: {kind: gpu, host: sentry}
+    job: {kind: gpu, host: zephyr}
     play_bars: 208
     mix_in_bars: 32
     transition: long_blend
@@ -167,7 +173,7 @@ tracks:
     duration: "5:24"
     instrumental: true
     takes: 3
-    job: {kind: gpu, host: sentry}
+    job: {kind: gpu, host: zephyr}
     play_bars: 176
     mix_in_bars: 0        # cut: the schema forces 0 for transition: cut
     transition: cut
@@ -181,7 +187,7 @@ tracks:
     duration: "6:30"
     instrumental: true
     takes: 3
-    job: {kind: gpu, host: sentry}
+    job: {kind: gpu, host: zephyr}
     play_bars: 208
     mix_in_bars: 32
     transition: long_blend

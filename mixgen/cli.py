@@ -7,7 +7,7 @@ import sys
 
 from mixgen import __version__
 from mixgen.plan import PlanError, load_plan
-from mixgen.stages import STAGES, parse_stages, run
+from mixgen.stages import DEFAULT_STAGES, STAGES, parse_stages, run
 
 
 def main(argv=None) -> int:
@@ -20,8 +20,9 @@ def main(argv=None) -> int:
                     help="print what each stage would do; never generate or call a backend")
     ap.add_argument("--backend", choices=("acestep", "fake"),
                     help="generation backend (default: plan 'backend', else acestep)")
-    ap.add_argument("--stages", default=",".join(STAGES),
-                    help=f"comma list of stages to run (default: {','.join(STAGES)})")
+    ap.add_argument("--stages", default=",".join(DEFAULT_STAGES),
+                    help=f"comma list of stages to run (default: {','.join(DEFAULT_STAGES)}; "
+                         f"'stems' is opt-in, see {','.join(STAGES)})")
     ap.add_argument("--force", action="store_true", help="rerun stages even when outputs exist")
     ap.add_argument("--json", action="store_true", help="print the run report as JSON")
     ap.add_argument("--version", action="version", version=f"mixgen {__version__}")

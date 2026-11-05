@@ -99,7 +99,7 @@ def synthesize(path: Path, *, bpm: float, camelot: str, duration: float,
 class FakeBackend(GenBackend):
     name = "fake"
 
-    def __init__(self, sample_rate: int = 48000):
+    def __init__(self, sample_rate: int = 48000, **_ignored):
         self.sample_rate = sample_rate
 
     def generate(self, track: Track, take_idx: int, out_path: Path) -> Path:
