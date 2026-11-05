@@ -12,12 +12,13 @@ the miner-handoff queue if a windowed need ever appears.
 - `envs/server` — python 3.12 (uv): mcp 1.30.0, PINNED `mcp>=1.0,<2` (mcp 2.x renamed FastMCP → MCPServer and breaks every 1.x bridge)
 - `recipes/`    — versioned DSP recipes as DATA (JSON defaults + docs; ranges validated in code, unknown params rejected)
 - `mcp/`        — the `audio` stdio MCP server (see the MCP section below)
+- `djmix/`     — cue-sheet DJ-mix renderer (see the djmix section below)
 - `jobs/`       — stem job records / logs / outputs (runtime; gitignored)
 - `reference/`  — shallow clones for design reference only (third-party repos; never run)
 
 Environment rebuild (venvs are gitignored):
 ```bash
-uv venv --python 3.12 envs/cpu    && uv pip install --python envs/cpu/bin/python    librosa pyloudnorm soundfile ffmpeg-normalize
+uv venv --python 3.12 envs/cpu    && uv pip install --python envs/cpu/bin/python    librosa pyloudnorm soundfile ffmpeg-normalize scipy pyyaml pytest
 uv venv --python 3.12 envs/ml     && uv pip install --python envs/ml/bin/python     torch torchaudio demucs
 uv venv --python 3.12 envs/server && uv pip install --python envs/server/bin/python "mcp>=1.0,<2"
 ```
@@ -92,6 +93,49 @@ envs/server/bin/python mcp/test_client.py   # full end-to-end proof (real runs)
 # Stems — direct:
 envs/ml/bin/python -m demucs.separate -n htdemucs --two-stems=vocals -d cpu -o OUT FILE
 ```
+
+## djmix — beat-matched DJ mixes from a cue sheet (`djmix/`)
+
+CPU-only, free tools only: librosa (tempo, beat grid, downbeat, key; madmom /
+`keyfinder-cli` are used automatically when installed), rubberband CLI (pitch-preserving
+time-stretch; falls back to librosa's phase vocoder), scipy (EQ / filters), ffmpeg
+(EBU R128 measurement + 4x-oversampled true-peak limiter).
+
+What it does, per cue sheet (`examples/dhtrance-cue.example.yaml`):
+1. **Analyse** each WAV: BPM (fine comb fit, 0.01 BPM), sample-accurate beat grid,
+   downbeat (strongest low-end onsets), key + Camelot code.
+2. **Plan** an output tempo map in bars. Track *n+1* starts `mix_in_bars` before track *n*
+   ends; every mix point sits on a 16- or 32-bar phrase boundary. With `ramp: true` the tempo
+   glides from the old target BPM to the new one across the blend.
+3. **Stretch** each track with one rubberband call and a per-beat time map, so every source
+   beat lands on its output beat (also through ramps); rubberband's R3 delay is calibrated
+   and removed.
+4. **Transitions**: `long_blend` (equal-power), `eq_bass_swap` (highs fade in, one-beat bass
+   swap on the phrase midpoint, zero-phase crossover so nothing drifts), `filter_sweep`
+   (outgoing high-pass sweep, incoming low-pass opening), `cut` (hard cut on the bar).
+5. **Render** one continuous 48 kHz / 24-bit stereo WAV plus a tracklist with timestamps;
+   loudness two-pass to `target_lufs` (default −9 LUFS integrated) with a −1 dBTP ceiling.
+
+Cue sheet keys — top level: `root`, `output`, `tracklist`, `phrase_bars` (16|32),
+`target_bpm` (default per track), `target_lufs`, `target_tp`, `loudnorm`, `sample_rate`.
+Per track: `file`, `title`, `target_bpm`, `start_bar` (bars to skip after the first
+downbeat), `play_bars`, `mix_in_bars`, `transition`, `ramp`, `gain_db`, and overrides
+`bpm` / `first_downbeat` if detection is ever wrong (check the `--dry-run` output).
+
+```bash
+# plan only: analysis, bar map, timestamps, warnings; renders nothing
+envs/cpu/bin/python -m djmix examples/dhtrance-cue.example.yaml --dry-run
+# render (paths relative to /data/media/archive unless --root / $DJMIX_ROOT)
+envs/cpu/bin/python -m djmix music/mixes/dh-trance-01/cue.yaml --json
+# on the cluster (music-tools image with djmix, see below), from nexus:
+~/fleet-tools/cpu-job generic -- "python -m djmix /data/media/archive/music/mixes/dh-trance-01/cue.yaml --json"
+```
+
+Tests: `envs/cpu/bin/python -m pytest -q tests` renders two synthetic click tracks
+(122 and 126 BPM) into a 124 BPM blend and asserts every beat of both tracks lands within
+10 ms of the shared grid through the blend, for both stretch engines; plus a ramped
+bass-swap and a full 48k/24-bit/loudness render. A 60 min render needs ~3 GB RAM and runs
+single-threaded, one track at a time.
 
 ## Next
 1. ~~Build the `audio-tools` MCP server (stdio)~~ — **done** (`mcp/`, 5 tools, registered as `audio`; restart/new session for pickup).

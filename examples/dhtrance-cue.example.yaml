@@ -1,0 +1,34 @@
+# djmix cue sheet: ~60 min deep house -> trance. Paths are relative to `root`
+# (default /data/media/archive, override with --root or $DJMIX_ROOT).
+root: /data/media/archive
+output: music/mixes/dh-trance-01/dh-trance-01.wav
+tracklist: music/mixes/dh-trance-01/dh-trance-01.tracklist.txt
+phrase_bars: 16          # 16 or 32: every mix point lands on a phrase boundary
+target_lufs: -9          # integrated, club/mix loudness
+target_tp: -1            # dBTP ceiling (4x-oversampled limiter)
+tracks:
+  - file: music/suno/dh-trance/01-warm-up.wav
+    title: Warm Up
+    target_bpm: 122
+    play_bars: 96
+  - file: music/suno/dh-trance/02-low-tide.wav
+    title: Low Tide
+    target_bpm: 122
+    start_bar: 8         # skip the 8-bar intro
+    play_bars: 112
+    mix_in_bars: 32
+    transition: eq_bass_swap
+  - file: music/suno/dh-trance/03-night-bus.wav
+    title: Night Bus
+    target_bpm: 124
+    play_bars: 112
+    mix_in_bars: 32
+    transition: long_blend
+    ramp: true           # glide 122 -> 124 across the 32-bar blend
+  # ... more tracks, climbing towards trance tempo ...
+  - file: music/suno/dh-trance/12-first-light.wav
+    title: First Light
+    target_bpm: 138
+    mix_in_bars: 16
+    transition: filter_sweep
+    ramp: true
