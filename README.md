@@ -246,6 +246,51 @@ Camelot conversion, cue bar/timestamp/chapter maths, plan validation, resumabili
 acestep argv + job-result collection with a fake submitter, and a dry run of the
 example plan).
 
+## relay-run — album release pipeline (`relayrun/`)
+
+CPU-only. `relay-run` validates designs, checks takes, masters, assembles a cue-sheet mix, splits that mix, writes `RELEASE.tsv`, and mirrors a release directory. It does not render new audio and it does not use a GPU. Rendering stays in a separate tool.
+
+CPU-heavy subcommands (`master`, `mix`, `split-sideb`) should be launched through the fleet `cpu-job` wrapper so they run on an approved CPU host. This package does not name hosts. Pass paths with flags or the environment variables below.
+
+| variable | default | meaning |
+|---|---|---|
+| `RELAY_DESIGNS_DIR` | `designs` | album directory of `NN-slug.json` (or a root of such directories) |
+| `RELAY_RENDERS_DIR` | `renders` | take root. Layout: `<renders>/<album>/<NN-slug>/take-N.flac` |
+| `RELAY_RELEASE_DIR` | `release` | `A/` masters, `B/` split mix, `RELEASE.tsv` |
+| `RELAY_CONTENT_GATE` | built-in gate | optional Python file exporting `main(root, report) -> 0\|1` |
+| `RELAY_MIRROR_HOST` | none | ssh host for `mirror` (`user@host` or a hostname) |
+| `RELAY_MIRROR_PATH` | none | absolute destination path on that host |
+| `RELAY_MIRROR_RSH` | `ssh` | remote shell passed to `rsync -e` |
+| `RELAY_FFMPEG` | `ffmpeg` | ffmpeg binary |
+
+Pinned Python deps used here: numpy 2.1.3, soundfile 0.12.1, scipy 1.14.1, pyloudnorm 0.1.1, PyYAML 6.0.2. Resampling and loudness use ffmpeg (soxr + EBU R128). sox is not required.
+
+```bash
+relay-run validate --designs "$RELAY_DESIGNS_DIR"
+relay-run qa --album ALBUM --designs "$RELAY_DESIGNS_DIR" --renders "$RELAY_RENDERS_DIR"
+relay-run master --album ALBUM --designs "$RELAY_DESIGNS_DIR" --renders "$RELAY_RENDERS_DIR" --release "$RELAY_RELEASE_DIR"
+relay-run mix --cue cue.yaml --root "$RELAY_RENDERS_DIR" --output mix.wav
+relay-run split-sideb --mix mix.wav --timeline mix.timeline.json --out "$RELAY_RELEASE_DIR/B"
+relay-run album --designs "$RELAY_DESIGNS_DIR" --release "$RELAY_RELEASE_DIR"
+relay-run mirror --release "$RELAY_RELEASE_DIR" --host "$RELAY_MIRROR_HOST" --dest "$RELAY_MIRROR_PATH"
+```
+
+Every subcommand has `--help`. `--dry-run` prints the plan and does not write outputs. A failed check exits non-zero and prints a `relay-run:` line.
+
+**validate** runs the content gate (24 or more tracks, 180–300 s each, estimated continuous mix 1:57–2:03, distinct titles and concepts, blend rule, copy rules). Pass writes `GATE.json` and `GATE.md`.
+
+**qa** checks each take for duration against the design (`max(1 s, 2%)`), clipping (sample peak at or above -0.1 dBFS), leading / trailing / internal silence (RMS below -60 dBFS for more than 0.5 s), and integrated loudness outside -40..-8 LUFS. The report is JSON or TSV.
+
+**master** trims only the edges (0.25 s pad, interior left intact, no fade), loudness-normalises to -14 LUFS with a -1.5 dBTP loudnorm target, and writes 44.1 kHz 24-bit stereo WAV. It then measures integrated loudness and an oversampled true peak (the higher of ffmpeg ebur128 and a 4x polyphase peak). The file fails when loudness is outside -15..-13 LUFS, true peak is above -1.0 dBTP, or either edge is silent for 0.5 s or more. One corrective limiter pass is allowed.
+
+**mix** reads the cue sheet documented in `relay-run mix --help` and `examples/relay-cue.example.yaml`. Overlaps are equal-power blends; `cut` is a hard join. The tool does not time-stretch or detect beats. Put the bar grid in the cue (`mix_in_bars` a multiple of the phrase, with `bpm`) so a later cut lands on a bar line. It writes the mix plus a `.timeline.json` of blend midpoints.
+
+**split-sideb** masters that whole mix once, then cuts at each blend midpoint and snaps to a zero crossing (default ±20 ms). There is no fade and no added silence at the cut. Each piece is titled `<title> (Mixed)`. Concatenating the pieces reproduces the mastered PCM; the command checks that and records the PCM md5. Piece loudness is measured for the release sheet and is allowed to vary. The unsplit `full-mix.wav` is kept for a long-form video and is not a store row.
+
+**album** writes `RELEASE.tsv` with columns `track_no side title file duration lufs_i true_peak_dbtp bpm key camelot md5 isrc songwriter instrumental`. The songwriter column is always blank. Credit fields on a design (`songwriter`, `composer`, `legal_name`, `author`, `writer`) are not copied. Side A rows need a PASS master receipt whose md5 matches the file. Side B rows come from `B/split-manifest.json`.
+
+**mirror** runs `rsync -a --checksum` over the configured remote shell and then `md5sum -c MANIFEST.md5` on the destination. There is no default host.
+
 ## Next
 1. ~~Build the `audio-tools` MCP server (stdio)~~ — **done** (`mcp/`, 5 tools, registered as `audio`; restart/new session for pickup).
 2. Wire a loudness + true-peak gate into the distribution lane (before DistroKid) — `release_validate` is the building block.

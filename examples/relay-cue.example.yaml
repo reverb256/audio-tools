@@ -1,0 +1,23 @@
+# Sample cue sheet for `relay-run mix` / `relay-run split-sideb`.
+# Paths are relative to --root (or to this file's directory). Replace them
+# with real takes. This file is a format example, not a release.
+version: 1
+sample_rate: 44100
+output: mix.wav
+tracks:
+  - title: Amber Kiln
+    file: amber.wav
+    bpm: 120
+    transition: cut
+    duration_s: 8
+  - title: Brass Harbor
+    file: brass.wav
+    bpm: 121
+    transition: blend
+    blend_s: 2
+  - title: Cinder Metro
+    file: cinder.wav
+    bpm: 122
+    transition: blend
+    mix_in_bars: 16
+    beats_per_bar: 4
