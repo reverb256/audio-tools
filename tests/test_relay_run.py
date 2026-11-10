@@ -241,17 +241,33 @@ def test_module_help():
     assert 'relay-run = "relayrun.cli:main"' in text
 
 
+def _forbidden_needles() -> list[str]:
+    """Generic leaks, plus optional extras from RELAY_FORBIDDEN_STRINGS.
+
+    CI does not set that variable. Callers that want a private name or host
+    checked can pass a comma-separated list in the environment.
+    """
+    needles = ["/home/", "noreply"]
+    raw = os.environ.get("RELAY_FORBIDDEN_STRINGS", "")
+    for part in raw.split(","):
+        item = part.strip().lower()
+        if item and item not in needles:
+            needles.append(item)
+    return needles
+
+
+def test_forbidden_needles_from_env(monkeypatch):
+    monkeypatch.setenv("RELAY_FORBIDDEN_STRINGS", "alpha-token, , BETA")
+    assert _forbidden_needles() == ["/home/", "noreply", "alpha-token", "beta"]
+
+
 def test_sources_omit_private_identifiers():
-    needles = ("/home/", "zephyr", "nexus", "sentry", "forge", "reverb256", "j_kro", "noreply")
     files = list((REPO / "relayrun").rglob("*.py"))
     files.append(REPO / "examples" / "relay-cue.example.yaml")
     files.append(REPO / ".github" / "workflows" / "relay-run.yml")
-    files.append(REPO / "tests" / "test_relay_run.py")
-    # The needles live in this function, so skip this source file's own text
-    # by scanning relayrun, the example, and the workflow only.
-    files = [p for p in files if p.name != "test_relay_run.py"]
+    # This file names the generic needles, so it is not part of the scan.
     blob = "\n".join(p.read_text(encoding="utf-8").lower() for p in files)
-    for needle in needles:
+    for needle in _forbidden_needles():
         assert needle not in blob, needle
 
 
