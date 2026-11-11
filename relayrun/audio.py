@@ -16,9 +16,34 @@ from relayrun.errors import RelayError
 
 SILENCE_DB = -60.0
 SILENCE_LIMIT_S = 0.5
-# Sample peak at or above this is "at or near full scale" (-0.1 dBFS).
-CLIP_DBFS = -0.1
-CLIP_LINEAR = 10 ** (CLIP_DBFS / 20.0)
+# RMS window for silence. One sample, including a zero crossing, cannot fill it.
+SILENCE_FRAME_S = 0.02
+# Non-silent audio shorter than this cannot bound an internal dropout.
+# A click or an isolated sample stays with the surrounding edge silence.
+SILENCE_CONTEXT_S = 0.05
+# Sample peak at or above this is a near-full-scale warning, not clipping.
+PEAK_WARN_DBFS = -0.1
+PEAK_WARN_LINEAR = 10 ** (PEAK_WARN_DBFS / 20.0)
+# Same threshold under the previous names. The value is unchanged.
+CLIP_DBFS = PEAK_WARN_DBFS
+CLIP_LINEAR = PEAK_WARN_LINEAR
+# Flat-top evidence must be longer than the same-code crest of a full-scale
+# sinusoid at this frequency for the file's integer step. Float formats have
+# no integer crest; they use the floor below.
+FLAT_TOP_REF_HZ = 20.0
+FLAT_TOP_FLOOR = 3
+# 4x polyphase peak on a low-frequency sine moves by only a few thousandths of
+# a dB. A larger gap is reported as an intersample overshoot. It is not clipping
+# and it is not the release true-peak gate.
+INTERSAMPLE_DISTINCT_DB = 0.05
+QA_OVERSAMPLE = 4
+
+_PCM_STEP = {
+    "PCM_U8": 1.0 / 128.0,
+    "PCM_16": 1.0 / 32768.0,
+    "PCM_24": 1.0 / 8388608.0,
+    "PCM_32": 1.0 / 2147483648.0,
+}
 
 
 def ffmpeg_bin() -> str:
@@ -69,68 +94,271 @@ def peak_dbfs(pcm: np.ndarray) -> float:
     return float(20.0 * math.log10(peak))
 
 
-def is_clipped(pcm: np.ndarray) -> bool:
+def quantization_step(subtype: str) -> float:
+    """Full-scale step of integer PCM after soundfile's float decode.
+
+    Float formats return 0: a flat-top is exact sample equality, and there is
+    no multi-sample quantised crest to exclude.
+    """
+    return _PCM_STEP.get(subtype or "", 0.0)
+
+
+def flat_top_min_samples(sample_rate: int, subtype: str) -> int:
+    """Minimum equal-sample run that is longer than a 20 Hz full-scale crest.
+
+    For integer PCM the crest of an unclipped sinusoid at ``FLAT_TOP_REF_HZ``
+    can sit on one code for several samples. A run must be longer than that
+    dwell (and at least ``FLAT_TOP_FLOOR`` samples) before it is a flat-top.
+    Float and unknown subtypes use the floor only.
+    """
+    step = quantization_step(subtype)
+    if step <= 0.0 or sample_rate <= 0:
+        return FLAT_TOP_FLOOR
+    dwell = sample_rate * math.sqrt(2.0 * step) / (math.pi * FLAT_TOP_REF_HZ)
+    return max(FLAT_TOP_FLOOR, math.ceil(dwell) + 1)
+
+
+def _longest_equal_run(channel: np.ndarray, level: float) -> tuple[int, float | None]:
+    """Longest run of identical samples whose absolute value is >= ``level``."""
+    x = np.ascontiguousarray(channel, dtype=np.float64)
+    n = int(x.size)
+    if n == 0:
+        return 0, None
+    hot = np.abs(x) >= level
+    if not np.any(hot):
+        return 0, None
+    boundary = np.empty(n, dtype=bool)
+    boundary[0] = True
+    boundary[1:] = ~((x[1:] == x[:-1]) & hot[1:] & hot[:-1])
+    starts = np.flatnonzero(boundary)
+    ends = np.append(starts[1:], n)
+    lengths = ends - starts
+    hot_start = hot[starts]
+    if not np.any(hot_start):
+        return 0, None
+    scored = np.where(hot_start, lengths, 0)
+    idx = int(np.argmax(scored))
+    best = int(scored[idx])
+    if best <= 0:
+        return 0, None
+    return best, float(x[int(starts[idx])])
+
+
+def clipping_report(pcm: np.ndarray, sr: int, subtype: str = "") -> dict:
+    """Sample-peak warning, flat-top clipping, and 4x oversampled peak.
+
+    Units: sample peak is dBFS re 1.0. The oversampled peak is dBTP from a
+    4x polyphase upsample (the same factor the release gate compares, but QA
+    does not apply the -1.0 dBTP limit). Clipping is a flat-top on one
+    channel: at least ``flat_top_min_samples`` consecutive decoded samples
+    with the same value, each at or above -0.1 dBFS. A single full-scale
+    sample, a smooth crest, and an intersample overshoot are not clipping.
+    """
+    data = np.asarray(pcm, dtype=np.float64)
+    if data.ndim == 1:
+        data = data[:, None]
+    channels = int(data.shape[1]) if data.ndim == 2 else 0
+    subtype = subtype or ""
+    min_run = flat_top_min_samples(int(sr), subtype)
+    best_len = 0
+    best_value = None
+    best_channel = None
+    for ch in range(channels):
+        length, value = _longest_equal_run(data[:, ch], PEAK_WARN_LINEAR)
+        if length > best_len:
+            best_len = length
+            best_value = value
+            best_channel = ch
+    sample_peak = peak_dbfs(data)
+    oversampled = true_peak_dbtp(data, int(sr), oversample=QA_OVERSAMPLE) if sr else -120.0
+    overshoot = float(oversampled - sample_peak)
+    value_db = None
+    if best_value is not None and abs(best_value) > 0.0:
+        value_db = float(20.0 * math.log10(abs(best_value)))
+    duration_s = (best_len / float(sr)) if sr and best_len else 0.0
+    return {
+        "sample_peak_dbfs": round(sample_peak, 3),
+        "near_full_scale": bool(np.isfinite(sample_peak) and sample_peak >= PEAK_WARN_DBFS),
+        "clipped": bool(best_len >= min_run and best_len > 0),
+        "flat_top_samples": int(best_len),
+        "flat_top_min_samples": int(min_run),
+        "flat_top_channel": best_channel,
+        "flat_top_value_dbfs": None if value_db is None else round(value_db, 3),
+        "flat_top_duration_s": round(duration_s, 6),
+        "channels": channels,
+        "sample_rate": int(sr),
+        "subtype": subtype,
+        "quantization_step": quantization_step(subtype),
+        "crest_reference_hz": FLAT_TOP_REF_HZ,
+        "oversample": QA_OVERSAMPLE,
+        "oversampled_peak_dbtp": round(float(oversampled), 3),
+        "intersample_overshoot_db": round(overshoot, 3),
+        "intersample_distinct": bool(overshoot > INTERSAMPLE_DISTINCT_DB),
+    }
+
+
+def is_clipped(pcm: np.ndarray, sr: int | None = None, subtype: str | None = None) -> bool:
+    """True only when ``clipping_report`` finds a flat-top.
+
+    A sample peak at or above -0.1 dBFS is not enough. ``subtype`` selects the
+    integer crest guard; unknown and float formats use a 3-sample floor.
+    """
     if pcm.size == 0:
         return False
-    return bool(np.max(np.abs(pcm)) >= CLIP_LINEAR)
+    return bool(clipping_report(pcm, int(sr or 0), subtype or "")["clipped"])
 
 
-def _frame_rms(pcm: np.ndarray, sr: int, frame_s: float = 0.05) -> tuple[np.ndarray, int]:
-    frame = max(1, int(round(frame_s * sr)))
-    n = pcm.shape[0]
-    usable = (n // frame) * frame
-    if usable == 0:
-        mono = pcm.astype(np.float64)
-        rms = float(np.sqrt(np.mean(mono ** 2))) if mono.size else 0.0
-        return np.array([rms]), n
-    frames = pcm[:usable].reshape(-1, frame, pcm.shape[1])
-    rms = np.sqrt(np.mean(frames.astype(np.float64) ** 2, axis=(1, 2)))
-    return rms, frame
+def _frame_spans(pcm: np.ndarray, sr: int, frame_s: float) -> tuple[list[float], list[tuple[int, int]]]:
+    """Max-channel RMS and ``[start, end)`` for each frame, including a short tail.
 
-
-def silence_regions(pcm: np.ndarray, sr: int, thresh_db: float = SILENCE_DB) -> dict:
-    """Leading, trailing, and longest internal silence, in seconds.
-
-    A frame is silent when its RMS is below ``thresh_db``. The opening run is
-    leading, the closing run is trailing, and any other run is internal.
+    A frame is one channel's energy. The returned level is the loudest channel,
+    so a silent channel does not mark the frame silent while another channel
+    still has signal. The tail is measured on its own and is not padded with
+    zeros.
     """
-    duration = pcm.shape[0] / float(sr) if sr else 0.0
-    rms, frame = _frame_rms(pcm, sr)
-    thresh = 10 ** (thresh_db / 20.0)
-    quiet = rms < thresh
-    runs: list[tuple[int, int]] = []
+    frame = max(1, int(round(frame_s * sr)))
+    n = int(pcm.shape[0])
+    levels: list[float] = []
+    spans: list[tuple[int, int]] = []
+    full = (n // frame) * frame
+    if full:
+        blocks = np.asarray(pcm[:full], dtype=np.float64).reshape(-1, frame, pcm.shape[1])
+        per = np.sqrt(np.mean(blocks * blocks, axis=1))
+        loudest = np.max(per, axis=1)
+        for i, value in enumerate(loudest):
+            levels.append(float(value))
+            spans.append((i * frame, (i + 1) * frame))
+    if full < n:
+        tail = np.asarray(pcm[full:], dtype=np.float64)
+        per = np.sqrt(np.mean(tail * tail, axis=0))
+        levels.append(float(np.max(per)) if per.size else 0.0)
+        spans.append((full, n))
+    return levels, spans
+
+
+def _silence_runs(flags: list[bool], spans: list[tuple[int, int]]) -> list[dict]:
+    runs: list[dict] = []
     i = 0
-    n = len(quiet)
+    n = len(flags)
     while i < n:
-        if not quiet[i]:
-            i += 1
-            continue
         j = i + 1
-        while j < n and quiet[j]:
+        while j < n and flags[j] == flags[i]:
             j += 1
-        runs.append((i, j))
+        runs.append({
+            "silent": bool(flags[i]),
+            "start": spans[i][0],
+            "end": spans[j - 1][1],
+        })
         i = j
+    return runs
 
-    def seconds(a: int, b: int) -> float:
-        return (b - a) * frame / float(sr)
 
+def _edge_silence(runs: list[dict], n: int, sr: int, context_s: float
+                  ) -> tuple[float, float, float, tuple[float, float] | None]:
+    """Split silence into leading, trailing, and internal seconds.
+
+    Internal silence is the longest gap between two non-silent runs that are
+    each at least ``context_s``. Anything before the first such run is leading,
+    and anything after the last is trailing. A sub-context blip does not split
+    those regions and does not count as a boundary. With no context-length
+    audio, a mostly silent file is all leading silence (a click is not an
+    internal dropout). A short, mostly-audio file reports only its edge
+    silence.
+    """
+    anchors = [
+        run for run in runs
+        if not run["silent"] and (run["end"] - run["start"]) / float(sr) >= context_s
+    ]
+    if anchors:
+        leading = anchors[0]["start"] / float(sr)
+        trailing = (n - anchors[-1]["end"]) / float(sr)
+        internal = 0.0
+        span = None
+        for left, right in zip(anchors, anchors[1:]):
+            gap = (right["start"] - left["end"]) / float(sr)
+            if gap > internal:
+                internal = gap
+                span = (left["end"] / float(sr), right["start"] / float(sr))
+        return leading, trailing, internal, span
+
+    nonsilent = sum((run["end"] - run["start"]) for run in runs if not run["silent"])
+    if nonsilent == 0 or nonsilent * 2 < n:
+        return (n / float(sr) if n else 0.0), 0.0, 0.0, None
     leading = 0.0
     trailing = 0.0
-    internal = 0.0
-    for a, b in runs:
-        length = seconds(a, b)
-        if a == 0:
-            leading = length
-        elif b == n:
-            trailing = length
-        else:
-            internal = max(internal, length)
+    if runs and runs[0]["silent"]:
+        leading = (runs[0]["end"] - runs[0]["start"]) / float(sr)
+    if runs and runs[-1]["silent"] and runs[-1]["start"] != 0:
+        trailing = (runs[-1]["end"] - runs[-1]["start"]) / float(sr)
+    return leading, trailing, 0.0, None
+
+
+def silence_regions(pcm: np.ndarray, sr: int, thresh_db: float = SILENCE_DB,
+                    frame_s: float = SILENCE_FRAME_S,
+                    context_s: float = SILENCE_CONTEXT_S) -> dict:
+    """Leading, trailing, and longest internal silence, in seconds.
+
+    A frame is silent when every channel's RMS is strictly below ``thresh_db``
+    (the stored level is the loudest channel). Leading silence touches the
+    start and trailing silence touches the end. Internal silence is a gap
+    between two stretches of non-silent audio that each last at least
+    ``context_s``. Durations are seconds of audio, not a count of near-zero
+    samples.
+    """
+    data = np.asarray(pcm, dtype=np.float64)
+    if data.ndim == 1:
+        data = data[:, None]
+    n = int(data.shape[0]) if data.ndim == 2 else 0
+    duration = n / float(sr) if sr else 0.0
+    empty = {
+        "leading_s": 0.0,
+        "trailing_s": 0.0,
+        "internal_s": 0.0,
+        "duration_s": round(duration, 4),
+        "internal_start_s": None,
+        "internal_end_s": None,
+        "threshold_dbfs": float(thresh_db),
+        "frame_s": float(frame_s),
+        "context_s": float(context_s),
+        "channel_rule": "loudest-channel RMS",
+    }
+    if n == 0 or sr <= 0:
+        return empty
+    levels, spans = _frame_spans(data, int(sr), frame_s)
+    thresh = 10 ** (float(thresh_db) / 20.0)
+    flags = [level < thresh for level in levels]
+    runs = _silence_runs(flags, spans)
+    leading, trailing, internal, span = _edge_silence(runs, n, int(sr), float(context_s))
     return {
         "leading_s": round(leading, 4),
         "trailing_s": round(trailing, 4),
         "internal_s": round(internal, 4),
         "duration_s": round(duration, 4),
+        "internal_start_s": None if span is None else round(span[0], 4),
+        "internal_end_s": None if span is None else round(span[1], 4),
+        "threshold_dbfs": float(thresh_db),
+        "frame_s": float(frame_s),
+        "context_s": float(context_s),
+        "channel_rule": "loudest-channel RMS",
     }
+
+
+def _frame_rms(pcm: np.ndarray, sr: int, frame_s: float = 0.05) -> tuple[np.ndarray, int]:
+    """Mean-square frames for edge trim. The short tail is left on the file.
+
+    Silence classification does not use this. Trim keeps its previous 10 ms
+    grid so a master does not move its edit points.
+    """
+    frame = max(1, int(round(frame_s * sr)))
+    n = pcm.shape[0]
+    usable = (n // frame) * frame
+    if usable == 0:
+        mono = np.asarray(pcm, dtype=np.float64)
+        rms = float(np.sqrt(np.mean(mono ** 2))) if mono.size else 0.0
+        return np.array([rms]), n
+    frames = np.asarray(pcm[:usable], dtype=np.float64).reshape(-1, frame, pcm.shape[1])
+    rms = np.sqrt(np.mean(frames ** 2, axis=(1, 2)))
+    return rms, frame
 
 
 def trim_edges(pcm: np.ndarray, sr: int, thresh_db: float = SILENCE_DB,
