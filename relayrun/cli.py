@@ -129,6 +129,13 @@ def cmd_qa(args) -> int:
     else:
         write_report(report, path, fmt)
         print(f"{report['verdict']}  {album}  takes={report['takes']} failures={report['failures']}  {path}")
+    for row in report["rows"]:
+        warns = "; ".join(row.get("warnings") or [])
+        if warns:
+            print(
+                f"relay-run: qa WARN {row.get('track')} take {row.get('take')}: {warns}",
+                file=sys.stderr,
+            )
     if report["verdict"] != "PASS":
         for row in report["rows"]:
             if row["verdict"] == "PASS":
@@ -328,7 +335,13 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--dry-run", action="store_true", help="print the verdict and do not write GATE files")
     validate.set_defaults(func=cmd_validate)
 
-    qa = sub.add_parser("qa", help="per-take duration, clipping, silence, and loudness checks")
+    qa = sub.add_parser(
+        "qa",
+        help=(
+            "per-take duration, near-full-scale peak warning, flat-top clipping, "
+            "silence, and raw-take loudness"
+        ),
+    )
     qa.add_argument("--designs", help="directory of NN-slug.json designs")
     qa.add_argument("--renders", help="renders root (default RELAY_RENDERS_DIR or ./renders)")
     qa.add_argument("--album", help="album slug; takes are <renders>/<album>/<NN-slug>/take-N.flac")
