@@ -1,0 +1,32 @@
+# leakguard: repo-local secret and state-file scan (fleet golden path).
+# The job name `leakguard` is a REQUIRED check for merge-when-green.
+name: leakguard
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: leakguard-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  leakguard:
+    name: leakguard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan the diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash scripts/leakguard-scan.sh "${BASE_SHA:-0000000000000000000000000000000000000000}" "$HEAD_SHA"

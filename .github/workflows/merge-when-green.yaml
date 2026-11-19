@@ -1,0 +1,291 @@
+# merge-when-green: label-gated squash-merge (fleet golden-path gate, v2).
+#
+# Source of truth: reverb256/golden-path. The author allowlist is ONE shared
+# file, reverb256/golden-path .github/merge-gate/author-allowlist.json at
+# ref main, fetched at runtime. Do not copy it into this repo.
+#
+# The gate merges a PR only when ALL of these hold on its CURRENT head SHA:
+#   - it carries `ready-to-merge` and NOT `hold` or `do-not-merge`;
+#   - it is open, not a draft, and its head branch lives in this repo (forks
+#     are always skipped);
+#   - its author is allowlisted. Fails closed: if the allowlist can't be
+#     fetched or isn't valid JSON, only `reverb256` is allowed;
+#   - Dependabot / Renovate PRs are patch or minor bumps. Unknown = major =
+#     skipped;
+#   - a PR touching .github/**, other CI config, secrets, or gate files has an
+#     APPROVED review on the head SHA;
+#   - at least one other workflow run or check run exists (zero runs = refuse);
+#   - every other workflow run, check run and commit status is green, and
+#     every name in REQUIRED_CHECKS (leakguard included) exists and passed;
+#   - it is mergeable and not behind its base. If it's behind, the gate runs a
+#     merge-style update-branch once and exits.
+# Any new head from someone other than the gate App drops `ready-to-merge`;
+# a human re-labels after reading the new diff.
+#
+# Tokens: the GitHub App token (vars.MERGE_GATE_APP_ID +
+# secrets.MERGE_GATE_APP_PRIVATE_KEY) is used ONLY for the label drop, the
+# update-branch and the merge. All reads use GITHUB_TOKEN, except the
+# allowlist read, which needs a token that can see reverb256/golden-path.
+# No App token means no merge and no update-branch (fail closed). Squash only,
+# --match-head-commit, never --admin, never a force-push.
+#
+# Security: this job never checks out or runs PR code. The pull_request_target,
+# workflow_run and check_suite triggers read this file from the default
+# branch, so a PR that edits it is judged by the copy already on main.
+# No ${{ }} expressions inside run: blocks; values reach bash through env.
+name: merge-when-green
+
+on:
+  pull_request_target:
+    types: [labeled, synchronize, reopened, ready_for_review]
+  workflow_run:
+    workflows: ["djmix tests", "leakguard", "relay-run tests"]
+    types: [completed]
+  check_suite:
+    types: [completed]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: read
+  statuses: read
+  actions: read
+
+concurrency:
+  group: merge-when-green-${{ github.event.pull_request.number || github.event.workflow_run.head_branch || github.event.check_suite.head_branch || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    name: merge
+    if: >-
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'pull_request' &&
+       github.event.workflow_run.head_repository.full_name == github.repository) ||
+      (github.event_name == 'check_suite' &&
+       github.event.check_suite.head_repository.full_name == github.repository) ||
+      (github.event_name == 'pull_request_review' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      # The ARC runner image ships curl and jq but not gh. Pinned, no sudo.
+      - name: Install gh
+        env:
+          GH_VERSION: "2.103.2"
+        run: |
+          set -euo pipefail
+          if command -v gh >/dev/null 2>&1; then gh --version | head -1; exit 0; fi
+          dest="$RUNNER_TEMP/gh"
+          mkdir -p "$dest"
+          curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
+            | tar -xz -C "$dest" --strip-components=1
+          echo "$dest/bin" >> "$GITHUB_PATH"
+
+      # App token scoped to THIS repo: label drop, update-branch, merge only.
+      - name: Mint gate App token
+        id: gate
+        if: ${{ vars.MERGE_GATE_APP_ID != '' }}
+        continue-on-error: true
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.MERGE_GATE_APP_ID }}
+          private-key: ${{ secrets.MERGE_GATE_APP_PRIVATE_KEY }}
+
+      # Read-only use: fetch the shared author allowlist from golden-path.
+      # Fails soft here; the judge step fails closed (reverb256 only).
+      - name: Mint allowlist read token
+        id: allow
+        if: ${{ vars.MERGE_GATE_APP_ID != '' }}
+        continue-on-error: true
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.MERGE_GATE_APP_ID }}
+          private-key: ${{ secrets.MERGE_GATE_APP_PRIVATE_KEY }}
+          owner: reverb256
+          repositories: golden-path
+
+      - name: Drop ready-to-merge on a new head
+        if: ${{ github.event_name == 'pull_request_target' && github.event.action == 'synchronize' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SENDER: ${{ github.event.sender.login }}
+          GATE_TOKEN: ${{ steps.gate.outputs.token }}
+          GATE_SLUG: ${{ steps.gate.outputs.app-slug }}
+        run: |
+          set -uo pipefail
+          if [[ -n "$GATE_SLUG" && "$SENDER" == "${GATE_SLUG}[bot]" ]]; then
+            echo "::notice::new head on #$PR came from the gate's own update-branch; label kept."
+            exit 0
+          fi
+          # Removing the label only ever closes the gate, so GITHUB_TOKEN is an
+          # acceptable fallback when the App token is missing.
+          tok="${GATE_TOKEN:-$GH_TOKEN}"
+          if GH_TOKEN="$tok" gh api -X DELETE "repos/$GH_REPO/issues/$PR/labels/ready-to-merge" >/dev/null 2>&1; then
+            echo "::notice::#$PR head changed (push by $SENDER); dropped ready-to-merge. Re-label after reading the new diff."
+          else
+            echo "::notice::#$PR head changed; ready-to-merge was not set."
+          fi
+
+      - name: Judge the gate and squash-merge if everything is green
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_FROM_EVENT: ${{ github.event.pull_request.number }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha || github.event.check_suite.head_sha }}
+          SELF_WORKFLOW: ${{ github.workflow_ref }}
+          GATE_LABEL: ready-to-merge
+          HOLD_LABELS: "hold do-not-merge"
+          REQUIRED_CHECKS: "leakguard"
+          ALLOWLIST_REPO: reverb256/golden-path
+          ALLOWLIST_PATH: .github/merge-gate/author-allowlist.json
+          ALLOWLIST_REF: main
+          GATE_TOKEN: ${{ steps.gate.outputs.token }}
+          ALLOW_TOKEN: ${{ steps.allow.outputs.token }}
+        run: |
+          set -euo pipefail
+          note() { echo "::notice::$*"; }
+          refuse() { echo "::error::$*"; exit 1; }
+          SELF_PATH=$(sed -E 's|^[^/]+/[^/]+/||; s|@.*$||' <<<"$SELF_WORKFLOW")
+
+          PR="$PR_FROM_EVENT"
+          if [[ -z "$PR" ]]; then
+            PR=$(gh api "repos/$GH_REPO/commits/$RUN_SHA/pulls" \
+                   --jq '[.[] | select(.state == "open")][0].number // empty')
+            if [[ -z "$PR" ]]; then note "no open PR for $RUN_SHA; nothing to do."; exit 0; fi
+          fi
+
+          META=$(gh api "repos/$GH_REPO/pulls/$PR")
+          [[ "$(jq -r .state <<<"$META")" == open ]] || { note "#$PR is not open."; exit 0; }
+          LABELS=$(jq -r '[.labels[].name] | join(" ")' <<<"$META")
+          has_label() { [[ " $LABELS " == *" $1 "* ]]; }
+          has_label "$GATE_LABEL" || { note "#$PR has no '$GATE_LABEL' label; gate closed."; exit 0; }
+          for h in $HOLD_LABELS; do
+            if has_label "$h"; then note "#$PR is labelled '$h'; skipped."; exit 0; fi
+          done
+          [[ "$(jq -r .draft <<<"$META")" != true ]] || { note "#$PR is a draft; skipped."; exit 0; }
+          if [[ "$(jq -r '.head.repo.full_name // ""' <<<"$META")" != "$GH_REPO" ]]; then
+            note "#$PR head is a fork or a deleted repo; always skipped."; exit 0
+          fi
+          SHA=$(jq -r .head.sha <<<"$META")
+          BASE=$(jq -r .base.ref <<<"$META")
+          AUTHOR=$(jq -r .user.login <<<"$META")
+          TITLE=$(jq -r .title <<<"$META")
+          if [[ -n "$RUN_SHA" && "$RUN_SHA" != "$SHA" ]]; then
+            note "run was for $RUN_SHA but #$PR head is $SHA; newer runs decide."; exit 0
+          fi
+          echo "Gate open on #$PR at $SHA (base $BASE, author $AUTHOR)."
+
+          # --- Author allowlist (shared file, fails closed) ------------------
+          FALLBACK='{"owners":["reverb256"],"dependency_bots":[],"fleet_apps":[]}'
+          ALLOW=""
+          for tok in "$ALLOW_TOKEN" "$GH_TOKEN"; do
+            [[ -n "$tok" ]] || continue
+            if raw=$(GH_TOKEN="$tok" gh api -H "Accept: application/vnd.github.raw+json" \
+                       "repos/$ALLOWLIST_REPO/contents/$ALLOWLIST_PATH?ref=$ALLOWLIST_REF" 2>/dev/null) \
+               && jq -e '(.owners|type=="array") and (.dependency_bots|type=="array") and (.fleet_apps|type=="array")
+                         and ([.owners[], .dependency_bots[].login, .fleet_apps[]] | all(type=="string"))' \
+                    >/dev/null 2>&1 <<<"$raw"; then
+              ALLOW="$raw"; break
+            fi
+          done
+          if [[ -z "$ALLOW" ]]; then
+            note "allowlist fetch failed or invalid; failing closed to reverb256 only."
+            ALLOW="$FALLBACK"
+          fi
+          KIND=$(jq -r --arg a "$AUTHOR" '
+            if (.owners | index($a)) then "owner"
+            elif (.fleet_apps | index($a)) then "app"
+            elif ([.dependency_bots[].login] | index($a)) then "bot"
+            else "none" end' <<<"$ALLOW")
+          if [[ "$KIND" == none ]]; then note "author $AUTHOR is not allowlisted; skipped even though labelled."; exit 0; fi
+
+          # --- Dependency bots: patch / minor only (unknown = major) ---------
+          if [[ "$KIND" == bot ]]; then
+            OK_TYPES=$(jq -r --arg a "$AUTHOR" '.dependency_bots[] | select(.login == $a) | .allow_update_types | join(" ")' <<<"$ALLOW")
+            UT="unknown"
+            case "$AUTHOR" in
+              "dependabot[bot]")
+                # Same metadata dependabot/fetch-metadata parses: every
+                # update-type line in the commit messages; the highest wins.
+                TYPES=$(gh api "repos/$GH_REPO/pulls/$PR/commits" --jq '.[].commit.message' \
+                          | grep -oE 'update-type: *version-update:semver-(major|minor|patch)' \
+                          | sed -E 's/.*semver-//' | sort -u | tr '\n' ' ' || true)
+                if   [[ " $TYPES " == *" major "* ]]; then UT="major"
+                elif [[ " $TYPES " == *" minor "* ]]; then UT="minor"
+                elif [[ " $TYPES " == *" patch "* ]]; then UT="patch"
+                fi ;;
+              "renovate[bot]")
+                LOW=$(tr '[:upper:]' '[:lower:]' <<<"$LABELS $TITLE")
+                if [[ "$LOW" =~ (^|[^a-z])major([^a-z]|$) ]]; then UT="major"
+                elif has_label minor || has_label "type: minor" || has_label "update:minor"; then UT="minor"
+                elif has_label patch || has_label "type: patch" || has_label "update:patch"; then UT="patch"
+                fi ;;
+            esac
+            if [[ "$UT" == unknown || "$UT" == major || " $OK_TYPES " != *" $UT "* ]]; then
+              note "$AUTHOR update type is '$UT'; only [$OK_TYPES] auto-merge. Skipped."; exit 0
+            fi
+            echo "dependency bot $AUTHOR, update type $UT: allowed."
+          fi
+
+          # --- Sensitive paths need an APPROVED review on this head ----------
+          SENS_RE='^\.github/|^\.gitlab-ci|^\.circleci/|^\.buildkite/|^\.woodpecker|^\.drone\.yml$|^azure-pipelines|(^|/)Jenkinsfile$|^\.githooks/|^\.pre-commit-config\.ya?ml$|(^|/)CODEOWNERS$|(^|/)(renovate\.json5?|\.renovaterc[^/]*)$|^scripts/leakguard-scan\.sh$|[Ss][Ee][Cc][Rr][Ee][Tt]|[Ss][Oo][Pp][Ss]|(^|/)\.env|\.(pem|key|p12|pfx)$'
+          SENS=$(gh api --paginate "repos/$GH_REPO/pulls/$PR/files?per_page=100" --jq '.[].filename' | grep -E "$SENS_RE" | head -5 | paste -sd' ' - || true)
+          if [[ -n "$SENS" ]]; then
+            APPROVED=$(gh api --paginate "repos/$GH_REPO/pulls/$PR/reviews?per_page=100" --jq '.[]' \
+              | jq -s --arg sha "$SHA" --arg a "$AUTHOR" '
+                  [.[] | select(.user.login != $a and (.state | IN("APPROVED","CHANGES_REQUESTED","DISMISSED")))]
+                  | group_by(.user.login) | map(max_by(.id))
+                  | map(select(.state == "APPROVED" and .commit_id == $sha)) | length')
+            if [[ "$APPROVED" -lt 1 ]]; then
+              note "#$PR touches sensitive paths ($SENS); needs an APPROVED review on $SHA. Skipped."; exit 0
+            fi
+            echo "sensitive paths ($SENS) approved on $SHA."
+          fi
+
+          # --- Every check on the head SHA ------------------------------------
+          WRUNS=$(gh api --paginate "repos/$GH_REPO/actions/runs?head_sha=$SHA&per_page=100" --jq '.workflow_runs[]' | jq -s .)
+          SELF_SUITES=$(jq -c --arg p "$SELF_PATH" '[.[] | select(.path == $p) | .check_suite_id]' <<<"$WRUNS")
+          OTHER=$(jq --arg p "$SELF_PATH" '[.[] | select(.path != $p)] | group_by(.workflow_id) | map(max_by(.id))' <<<"$WRUNS")
+          RUNS=$(gh api --paginate "repos/$GH_REPO/commits/$SHA/check-runs?per_page=100" --jq '.check_runs[]' | jq -s .)
+          LATEST=$(jq --argjson self "$SELF_SUITES" '[.[] | select((.check_suite.id | IN($self[])) | not)] | group_by(.name) | map(max_by(.id))' <<<"$RUNS")
+          STATUSES=$(gh api "repos/$GH_REPO/commits/$SHA/status" --jq '.statuses')
+          if [[ "$(jq length <<<"$OTHER")" -eq 0 && "$(jq length <<<"$LATEST")" -eq 0 ]]; then
+            note "refusing: zero workflow runs and zero check runs on $SHA. A CI completion re-arms the gate."; exit 0
+          fi
+          PENDING=$( { jq -r '.[] | select(.status != "completed") | "\(.name)=\(.status)"' <<<"$OTHER"
+                       jq -r '.[] | select(.status != "completed") | "\(.name)=\(.status)"' <<<"$LATEST"
+                       jq -r '.[] | select(.state == "pending") | .context' <<<"$STATUSES"; } | paste -sd' ' - || true)
+          FAILED=$( { jq -r '.[] | select(.status == "completed" and (.conclusion | IN("success","neutral","skipped") | not)) | "\(.name)=\(.conclusion)"' <<<"$OTHER"
+                      jq -r '.[] | select(.status == "completed" and (.conclusion | IN("success","neutral","skipped") | not)) | "\(.name)=\(.conclusion)"' <<<"$LATEST"
+                      jq -r '.[] | select(.state == "failure" or .state == "error") | "\(.context)=\(.state)"' <<<"$STATUSES"; } | paste -sd' ' - || true)
+          [[ -z "$FAILED" ]] || refuse "#$PR at $SHA has failing checks: $FAILED"
+          [[ -z "$PENDING" ]] || { note "#$PR still pending: $PENDING"; exit 0; }
+          for c in $REQUIRED_CHECKS; do
+            ok=$(jq -r --arg c "$c" '[.[] | select(.name == $c and .conclusion == "success")] | length' <<<"$LATEST")
+            [[ "$ok" -ge 1 ]] || { note "required check '$c' has not passed on $SHA yet."; exit 0; }
+          done
+
+          # --- Mergeable and up to date ----------------------------------------
+          MERGEABLE=$(jq -r '.mergeable' <<<"$META")
+          [[ "$MERGEABLE" != false ]] || refuse "#$PR has conflicts with $BASE."
+          [[ "$MERGEABLE" == true ]] || { note "#$PR mergeability still computing."; exit 0; }
+          if [[ -z "$GATE_TOKEN" ]]; then
+            note "no gate App token (vars.MERGE_GATE_APP_ID / secret unset or mint failed); gate closed, no merge."; exit 0
+          fi
+          BEHIND=$(gh api "repos/$GH_REPO/compare/$BASE...$SHA" --jq .behind_by)
+          if [[ "$BEHIND" -gt 0 ]]; then
+            GH_TOKEN="$GATE_TOKEN" gh api -X PUT "repos/$GH_REPO/pulls/$PR/update-branch" \
+              -f expected_head_sha="$SHA" >/dev/null
+            note "#$PR was $BEHIND behind $BASE; merged $BASE into it (update-branch). The new CI run re-arms the gate."
+            exit 0
+          fi
+
+          GH_TOKEN="$GATE_TOKEN" gh pr merge "$PR" --repo "$GH_REPO" --squash --match-head-commit "$SHA"
+          note "squash-merged #$PR at $SHA."
