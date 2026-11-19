@@ -43,8 +43,6 @@ on:
     types: [completed]
   check_suite:
     types: [completed]
-  pull_request_review:
-    types: [submitted, dismissed]
 
 permissions:
   contents: read
@@ -67,9 +65,7 @@ jobs:
        github.event.workflow_run.event == 'pull_request' &&
        github.event.workflow_run.head_repository.full_name == github.repository) ||
       (github.event_name == 'check_suite' &&
-       github.event.check_suite.head_repository.full_name == github.repository) ||
-      (github.event_name == 'pull_request_review' &&
-       github.event.pull_request.head.repo.full_name == github.repository)
+       github.event.check_suite.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
@@ -79,12 +75,18 @@ jobs:
           GH_VERSION: "2.103.2"
         run: |
           set -euo pipefail
-          if command -v gh >/dev/null 2>&1; then gh --version | head -1; exit 0; fi
+          if command -v gh >/dev/null 2>&1; then
+            gh --version | head -1
+            exit 0
+          fi
           dest="$RUNNER_TEMP/gh"
           mkdir -p "$dest"
-          curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
-            | tar -xz -C "$dest" --strip-components=1
+          archive="$dest/gh_${GH_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "$archive" "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz"
+          echo "62ccf747115ddc61237efffdde66a3c8f70ba249433dc64f70801089b59c59c8  $archive" | sha256sum -c -
+          tar -xzf "$archive" -C "$dest" --strip-components=1
           echo "$dest/bin" >> "$GITHUB_PATH"
+          "$dest/bin/gh" --version | head -1
 
       # App token scoped to THIS repo: label drop, update-branch, merge only.
       - name: Mint gate App token
