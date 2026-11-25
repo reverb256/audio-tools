@@ -1,6 +1,6 @@
 """Synthetic WAV backend: drums + a tonal pad in the target key.
 
-Used by tests and ``--dry-run``-adjacent workflows where no GPU/ACE-Step is
+Used by tests and ``--dry-run``-adjacent workflows where no GPU backend is
 available. The layout mirrors the prompts the real backend receives: a
 drums-only intro and outro of 16 bars, pad + drums in the body.
 """

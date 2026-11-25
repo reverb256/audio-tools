@@ -4,9 +4,8 @@ A backend turns one track into its audio takes. Stages call it with temporary
 paths and commit the results atomically, so a crash mid-generation never leaves
 a half-written take in place.
 
-Backends that generate tracks as one batch (``acestep``: one gpu-music-job with
-``--takes N``) override :meth:`generate_track`; per-take backends only need
-:meth:`generate`.
+Backends that generate tracks as one batch (one job with ``--takes N``)
+override :meth:`generate_track`; per-take backends only need :meth:`generate`.
 """
 from __future__ import annotations
 

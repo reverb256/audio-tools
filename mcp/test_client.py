@@ -26,7 +26,7 @@ from mcp.client.stdio import stdio_client
 ROOT = Path(__file__).resolve().parent.parent
 SERVER = ROOT / "mcp" / "audio-mcp.sh"
 FFMPEG = "/usr/bin/ffmpeg"
-SRC = Path("/home/j_kro/Music/acestep/final-round_00001.flac")
+SRC = Path("/home/j_kro/Music/library/final-round_00001.flac")  # fixture; ACE-Step library was removed
 ART = ROOT / "mcp" / ".test-artifacts"
 
 

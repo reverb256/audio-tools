@@ -31,7 +31,7 @@ _NUM_RE = re.compile(r"\d+(?:\.\d+)?")
 
 _TOP_KEYS = {
     "title", "slug", "output", "sample_rate", "phrase_bars", "beats_per_bar",
-    "takes", "backend", "gen", "acestep", "target_lufs", "target_tp", "tracks",
+    "takes", "backend", "gen", "target_lufs", "target_tp", "tracks",
     "root", "stems",
 }
 _TRACK_KEYS = {
@@ -166,7 +166,6 @@ class Plan:
     target_lufs: float = -9.0
     target_tp: float = -1.0
     backend: str | None = None
-    acestep: dict = field(default_factory=dict)
     stems: dict = field(default_factory=dict)
 
     # ---- paths -------------------------------------------------------
@@ -325,6 +324,11 @@ def load_plan(path: str | Path, root: str | Path | None = None) -> Plan:
         raise PlanError(f"cannot read plan {path}: {exc}") from exc
     if not isinstance(data, dict):
         raise PlanError("plan YAML must be a mapping")
+    if "acestep" in data or str(data.get("backend") or "") == "acestep" \
+            or str((data.get("gen") or {}).get("backend") or "") == "acestep":
+        raise PlanError(
+            "the ACE-Step backend was removed; set backend: fake (or omit it) "
+            "and drop any acestep: block")
     unknown = set(data) - _TOP_KEYS
     if unknown:
         raise PlanError(f"unknown top-level keys {sorted(unknown)}")
@@ -351,9 +355,6 @@ def load_plan(path: str | Path, root: str | Path | None = None) -> Plan:
     dupes = sorted({s for s in slugs if slugs.count(s) > 1})
     if dupes:
         raise PlanError(f"duplicate track slugs {dupes}")
-    acestep = data.get("acestep") or {}
-    if not isinstance(acestep, dict):
-        raise PlanError("'acestep' must be a mapping")
     stems = data.get("stems") or {}
     if not isinstance(stems, dict):
         raise PlanError("'stems' must be a mapping")
@@ -364,15 +365,15 @@ def load_plan(path: str | Path, root: str | Path | None = None) -> Plan:
     backend = data.get("backend") or (data.get("gen") or {}).get("backend")
     if backend is not None:
         backend = str(backend)
-        if backend not in ("acestep", "fake"):
-            raise PlanError(f"backend must be 'acestep' or 'fake', got {backend!r}")
+        if backend not in ("fake",):
+            raise PlanError(f"backend must be 'fake', got {backend!r}")
     return Plan(
         title=title, slug=slug, root=root_p, output=output, tracks=tracks, source=path,
         sample_rate=int(data.get("sample_rate", 48000)),
         phrase_bars=phrase, beats_per_bar=int(data.get("beats_per_bar", DEFAULT_BEATS_PER_BAR)),
         target_lufs=float(data.get("target_lufs", -9.0)),
         target_tp=float(data.get("target_tp", -1.0)),
-        backend=backend, acestep=acestep,
+        backend=backend,
         stems=stems,
     )
 

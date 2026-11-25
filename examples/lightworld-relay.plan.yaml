@@ -1,6 +1,6 @@
 # Lightworld Relay — 12 original tracks, deep house -> trance, 61:19 continuous mix.
 # Paths are relative to --root (default /music). Generation jobs go to zephyr's
-# 3090 through the gpu-music-job wrapper (acestep backend).
+# 3090. The ACE-Step backend has been removed; this example uses the fake backend.
 #
 # Style prompts are the ones written for this mix. Cue fields follow the plan's
 # cue table: 32-bar phrase blends with tempo ramps, except track 11, which is a
@@ -11,14 +11,8 @@ output: mixes/lightworld-relay
 sample_rate: 48000
 phrase_bars: 16
 takes: 3
-backend: acestep
-acestep:
-  wrapper: gpu-music-job
-  poll_interval: 30
-  # Each track is one gpu-music-job 'acestep' job (--takes 3, a batch). Output is
-  # a flat dir: /music/gen/<mix>/<track>/ (FLAC + job-request.json/job-result.json).
-  # A job is done when job-result.json exists; gpu-music-job status <job-name> is
-  # used for progress. There is no token/auth.
+backend: fake
+# Each track is generated as a batch of 3 takes under /music/gen/<mix>/<track>/.
 # Opt-in stems step, only run with --stages ...,stems:
 # stems:
 #   enabled: true
