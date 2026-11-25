@@ -18,8 +18,8 @@ def main(argv=None) -> int:
     ap.add_argument("--root", help="base dir for every path in the plan (default: /music)")
     ap.add_argument("--dry-run", action="store_true",
                     help="print what each stage would do; never generate or call a backend")
-    ap.add_argument("--backend", choices=("acestep", "fake"),
-                    help="generation backend (default: plan 'backend', else acestep)")
+    ap.add_argument("--backend", choices=("fake",),
+                    help="generation backend (default: plan 'backend', else fake)")
     ap.add_argument("--stages", default=",".join(DEFAULT_STAGES),
                     help=f"comma list of stages to run (default: {','.join(DEFAULT_STAGES)}; "
                          f"'stems' is opt-in, see {','.join(STAGES)})")

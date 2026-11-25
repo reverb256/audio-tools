@@ -1,5 +1,5 @@
 """mixgen tests: QA scoring, Camelot math, cue generation, plan validation,
-resumability, acestep argv/job-result collection, and a dry run of the example plan.
+resumability, and a dry run of the example plan.
 """
 from __future__ import annotations
 
@@ -13,10 +13,6 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from mixgen import cli  # noqa: E402
-from mixgen.backends.acestep import (AceStepBackend, AceStepConfig,  # noqa: E402
-                                     job_fields, out_relpath_for,
-                                     parse_job_name, wait_for_result)
-from mixgen.backends.acestep_flags import build_argv, build_demucs_argv  # noqa: E402
 from mixgen.backends.fake import synthesize  # noqa: E402
 from mixgen.cuegen import build_cue, chapters, timeline, total_duration  # noqa: E402
 from mixgen.plan import (Job, PlanError, Track, camelot_of,  # noqa: E402
@@ -249,131 +245,7 @@ def test_dry_run_example_prints_all_stages(tmp_path, capsys):
     assert not (tmp_path / "mixes").exists()
 
 
-# ------------------------------------------------------------------ acestep
-def test_build_argv_field_mapping():
-    argv = build_argv({
-        "prompt": "deep house", "instrumental": True, "duration": 300,
-        "bpm": "120", "key": "8A", "seed": 7, "takes": 2,
-        "out_relpath": "my-mix/track-one",
-    })
-    assert argv == ["gpu-music-job", "acestep", "--prompt", "deep house",
-                    "--instrumental", "--duration", "300", "--bpm", "120",
-                    "--key", "8A", "--seed", "7", "--takes", "2",
-                    "--out-relpath", "my-mix/track-one"]
-    with_lyrics = build_argv({"prompt": "p", "lyrics": "@lyrics.txt",
-                              "instrumental": False, "duration": 10,
-                              "bpm": "90", "key": "4A", "seed": 1, "takes": 1,
-                              "dry_run": True},
-                             wrapper="job", extra=["--namespace", "music"])
-    assert with_lyrics[:5] == ["job", "acestep", "--prompt", "p", "--lyrics"]
-    assert "@lyrics.txt" in with_lyrics
-    assert "--instrumental" not in with_lyrics
-    assert "--dry-run" in with_lyrics
-    assert with_lyrics[-2:] == ["--namespace", "music"]
-    with pytest.raises(ValueError, match="unknown acestep job fields"):
-        build_argv({"tempo": 120})
-
-
-def test_build_demucs_argv():
-    assert build_demucs_argv("my-mix/track-one", "my-mix/track-one-stems") == [
-        "gpu-music-job", "demucs",
-        "--in-relpath", "my-mix/track-one", "--out-relpath", "my-mix/track-one-stems"]
-    assert build_demucs_argv("in", "out", model="htdemucs", wrapper="job") == [
-        "job", "demucs", "--in-relpath", "in", "--out-relpath", "out",
-        "--model", "htdemucs"]
-
-
-def test_job_fields_and_parse_job_name(tmp_path):
-    plan = load_plan(write_plan(tmp_path, takes=2), tmp_path)
-    track = plan.tracks[0]
-    fields = job_fields(track, out_relpath_for(plan, track))
-    assert out_relpath_for(plan, track) == "test-mix/test-track"
-    assert fields["bpm"] == "120" and fields["key"] == "8A"
-    assert fields["takes"] == 2 and fields["out_relpath"] == "test-mix/test-track"
-    assert "seed" not in fields and fields["instrumental"] is True
-    assert parse_job_name("created job my-mix-track-abc") == "my-mix-track-abc"
-    assert parse_job_name('{"job": "j-17"}') == "j-17"
-    assert parse_job_name("") is None
-
-
-def test_wait_for_result_reads_job_result_json(tmp_path):
-    state = {"sleeps": 0}
-    result = tmp_path / "job-result.json"
-
-    def sleep(_interval):
-        state["sleeps"] += 1
-        if state["sleeps"] == 2:
-            result.write_text('{"audios": [{"path": "/music/gen/x/y/a.flac"}]}')
-
-    data = wait_for_result(result, poll_interval=0, sleep=sleep, log=None)
-    assert data["audios"][0]["path"] == "/music/gen/x/y/a.flac"
-    assert state["sleeps"] == 2
-
-
-def test_wait_for_result_surfaces_status_failure(tmp_path):
-    def status(job_name):
-        return 3, "job failed: CUDA OOM"
-
-    with pytest.raises(Exception, match="status .* failed \\(3\\).*CUDA OOM"):
-        wait_for_result(tmp_path / "job-result.json", job_name="j-1",
-                        status=status, poll_interval=0, sleep=lambda _s: None)
-
-
-def test_acestep_batch_one_job_copies_all_takes(tmp_path):
-    plan = load_plan(write_plan(tmp_path, takes=2), tmp_path)
-    track = plan.tracks[0]
-    gen_dir = plan.track_gen_dir(track)
-    gen_dir.mkdir(parents=True)
-    src_dir = tmp_path / "pvc" / "gen" / "test-mix" / "test-track"
-    src_dir.mkdir(parents=True)
-    (src_dir / "a.flac").write_bytes(b"FLAC-a")
-    (src_dir / "b.flac").write_bytes(b"FLAC-b")
-    submitted: list[list[str]] = []
-
-    def submit(argv):
-        submitted.append(argv)
-        (gen_dir / "job-result.json").write_text(json.dumps({
-            "job": "mix-test-track-1",
-            "audios": [{"path": str(src_dir / "a.flac")},
-                       {"path": str(src_dir / "b.flac")}],
-        }))
-        return "created job mix-test-track-1"
-
-    cfg = AceStepConfig(wrapper="gpu-music-job", poll_interval=0)
-    backend = AceStepBackend(plan, cfg, submit=submit, sleep=lambda _s: None)
-    out1, out2 = tmp_path / "take-1.flac", tmp_path / "take-2.flac"
-    backend.generate_track(track, [(1, out1), (2, out2)])
-    assert out1.read_bytes() == b"FLAC-a"
-    assert out2.read_bytes() == b"FLAC-b"
-
-    assert len(submitted) == 1                      # one Job for all takes
-    argv = submitted[0]
-    assert argv[:2] == ["gpu-music-job", "acestep"]
-    assert argv[argv.index("--takes") + 1] == "2"
-    assert argv[argv.index("--out-relpath") + 1] == "test-mix/test-track"
-    assert "--prompt" in argv and "--instrumental" in argv
-
-
-def test_acestep_reuses_existing_job_result(tmp_path):
-    plan = load_plan(write_plan(tmp_path, takes=2), tmp_path)
-    track = plan.tracks[0]
-    gen_dir = plan.track_gen_dir(track)
-    gen_dir.mkdir(parents=True)
-    (gen_dir / "a.flac").write_bytes(b"FLAC-a")
-    (gen_dir / "b.flac").write_bytes(b"FLAC-b")
-    (gen_dir / "job-result.json").write_text(json.dumps({
-        "audios": [{"path": str(gen_dir / "a.flac")},
-                   {"path": str(gen_dir / "b.flac")}]}))
-
-    def submit(argv):  # pragma: no cover - must not be called
-        raise AssertionError("submitted a new job despite an existing result")
-
-    backend = AceStepBackend(plan, AceStepConfig(poll_interval=0), submit=submit)
-    out = tmp_path / "take-2.flac"
-    backend.generate(track, 2, out)
-    assert out.read_bytes() == b"FLAC-b"
-
-
+# ------------------------------------------------------------------ stems
 def test_stems_stage_is_opt_in(tmp_path):
     from mixgen.stages import run_stems
 
@@ -388,12 +260,14 @@ def test_stems_stage_is_opt_in(tmp_path):
     assert enabled.stems_rel(enabled.tracks[0]) == "test-mix/test-track-stems"
 
 
-def test_acestep_command_template_placeholders(tmp_path):
-    plan = load_plan(write_plan(tmp_path, takes=2), tmp_path)
-    track = plan.tracks[0]
-    cfg = AceStepConfig(command="submit --text {prompt} --len {duration} --out {out_relpath}")
-    backend = AceStepBackend(plan, cfg, submit=lambda argv: None)
-    argv = backend.argv_for(track, out_relpath="test-mix/test-track")
-    assert argv[0] == "submit"
-    assert argv[1] == "--text" and "deep house" in argv[2]
-    assert "test-mix/test-track" in argv
+def test_plan_rejects_removed_acestep_backend(tmp_path):
+    path = write_plan(tmp_path, name="ace.yaml", backend="acestep")
+    with pytest.raises(PlanError, match="ACE-Step backend was removed"):
+        load_plan(path, tmp_path)
+    other = tmp_path / "ace-block.yaml"
+    data = yaml.safe_load(path.read_text())
+    data["backend"] = "fake"
+    data["acestep"] = {"wrapper": "gpu-music-job"}
+    other.write_text(yaml.safe_dump(data))
+    with pytest.raises(PlanError, match="ACE-Step backend was removed"):
+        load_plan(other, tmp_path)

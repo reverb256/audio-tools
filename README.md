@@ -60,7 +60,7 @@ sandwich so interior quiet passages are never touched) · `normalize-peak` (sox
 last).
 
 ### Verified end-to-end — 2026-10-17, `envs/server/bin/python mcp/test_client.py` (real runs)
-- `audio_qc` on `~/Music/acestep/final-round_00001.flac`: pyloudnorm(stereo) **−10.585** LUFS ·
+- `audio_qc` on a stereo FLAC fixture: pyloudnorm(stereo) **−10.585** LUFS ·
   mono-downmix **−14.267** · ebur128 I **−10.6 LUFS** · LRA 3.4 · sample peak 0.0 dBFS ·
   TPK **+0.4 dBTP** → `true_peak_ok=false`. The phase-1 "1–4 LU pyloudnorm↔ebur128
   delta" was mostly the mono downmix — matched-layout agreement is ~0.01 LU; both
@@ -164,11 +164,7 @@ output: mixes/my-mix            # dir under --root (default /music)
 sample_rate: 48000
 phrase_bars: 16                 # 16 or 32
 takes: 3                        # default takes per track
-backend: acestep                # acestep | fake (CLI --backend overrides)
-acestep:
-  wrapper: gpu-music-job          # locked gpu-music-job contract, no token/auth
-  poll_interval: 30              # seconds between job-result.json checks
-  # dry_run: true                # pass --dry-run to the wrapper job
+backend: fake                   # remaining backend (CLI --backend overrides)
 tracks:
   - title: Track One
     slug: track-one             # optional; derived from title
@@ -195,11 +191,9 @@ output dir.
 
 **Stages** (`--stages gen,qa,master,stems,mix`, canonical order):
 
-1. `gen` — one `gpu-music-job acestep --takes N` per track (a batch, not one job
-   per take) writing a flat directory `gen/<mix>/<track>/` on the PVC, then each
-   take is copied out of `job-result.json -> audios[].path`. `fake` synthesises
-   a WAV (kick on the beat at the target BPM, a tonic-triad pad in the target key,
-   16-bar drums-only intro/outro) for tests and offline runs.
+1. `gen` — the `fake` backend synthesises a WAV (kick on the beat at the target
+   BPM, a tonic-triad pad in the target key, 16-bar drums-only intro/outro) for
+   tests and offline runs. The ACE-Step `gpu-music-job` generator was removed.
 2. `qa` — per take: tempo (librosa + comb fit, half/double folded), key (chroma +
    Krumhansl → Camelot, measured on the harmonic body), length, drums-only
    intro/outro ≥ 16 bars (HPSS harmonic vs percussive energy), clipping and
@@ -221,30 +215,15 @@ output dir.
 skip/run decision. It never generates, renders or calls a backend, and works with
 no audio present.
 
-**ACE-Step backend config.** Generation runs through the locked `gpu-music-job`
-contract on the default `gpu@zephyr` target; there is no token or auth. Submit
-argv is `gpu-music-job acestep --prompt TEXT [--lyrics TEXT|@file]
-[--instrumental] [--duration SEC] [--bpm N] [--key TEXT] [--seed N]
-[--takes N] [--out-relpath REL] [--dry-run]`, one job per track with all takes
-(`--takes N`). Output is a flat directory `/music/gen/<out-relpath>/` on the PVC
-(host `/data/shared/music/gen/<out-relpath>/`), FLAC by default, plus
-`job-request.json` and `job-result.json`; takes come from
-`job-result.json -> audios[].path`. A job is done when `job-result.json` exists,
-and `gpu-music-job status <job-name>` (name echoed on create) reports progress.
-Non-zero wrapper exits (0/2/3) are surfaced as errors.
-
-The field→flag mapping lives only in `mixgen/backends/acestep_flags.py`
-(`FIELD_FLAGS` + `build_argv()`; `build_demucs_argv()` for the opt-in stems
-step). Configuration comes from the plan's `acestep:` block or environment (env
-wins): `MIXGEN_ACESTEP_WRAPPER` (default `gpu-music-job`),
-`MIXGEN_ACESTEP_COMMAND` (full argv template with `{prompt} {lyrics}
-{instrumental} {duration} {bpm} {key} {seed} {takes} {out_relpath}`),
-`MIXGEN_ACESTEP_POLL_INTERVAL`, `MIXGEN_ACESTEP_DRY_RUN`.
+The ACE-Step generation backend (`mixgen/backends/acestep.py` and
+`acestep_flags.py`) has been removed. Plans must use `backend: fake` (or omit
+the field and pass `--backend fake`) and must not include an `acestep:` block.
+The opt-in `stems` stage also used that wrapper, so it currently errors until a
+replacement backend is added.
 
 Tests: `python -m pytest -q tests/test_mixgen.py` (synthetic audio; QA ranking,
 Camelot conversion, cue bar/timestamp/chapter maths, plan validation, resumability,
-acestep argv + job-result collection with a fake submitter, and a dry run of the
-example plan).
+and a dry run of the example plan).
 
 ## relay-run — album release pipeline (`relayrun/`)
 

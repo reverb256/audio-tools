@@ -158,10 +158,10 @@ def run_stems(plan: Plan, force: bool, log=print) -> dict:
         raise PlanError(
             "the stems stage is opt-in: add a top-level 'stems: {enabled: true}' block "
             "to the plan (optional: model: htdemucs)")
-    from mixgen.backends.acestep import AceStepBackend
-
-    backend = AceStepBackend(plan, log=log)
-    model = cfg.get("model") or None
+    raise PlanError(
+        "the stems stage used the removed ACE-Step gpu-music-job wrapper; "
+        "it is unavailable until a replacement backend is added")
+    model = cfg.get("model") or None  # pragma: no cover
     made = skipped = 0
     for track in plan.tracks:
         src = pick_path(plan, track)
@@ -296,7 +296,7 @@ def run(plan: Plan, stages: list[str], backend_name: str | None = None,
         force: bool = False, dry_run_mode: bool = False, log=print) -> dict:
     """Run the selected stages in canonical order and return a small report."""
     stages = [s for s in STAGES if s in stages]
-    name = backend_name or plan.backend or "acestep"
+    name = backend_name or plan.backend or "fake"
     report: dict = {"mix": plan.slug, "backend": name, "stages": stages}
     if dry_run_mode:
         dry_run(plan, stages, name, force, log)
