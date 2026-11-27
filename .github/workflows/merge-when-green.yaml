@@ -19,6 +19,7 @@
 #     every name in REQUIRED_CHECKS (leakguard included) exists and passed;
 #   - it is mergeable and not behind its base. If it's behind, the gate runs a
 #     merge-style update-branch once and exits.
+#   - the squash body is the PR body, so standalone `Closes #N` keywords land.
 # Any new head from someone other than the gate App drops `ready-to-merge`;
 # a human re-labels after reading the new diff.
 #
@@ -30,8 +31,9 @@
 # --match-head-commit, never --admin, never a force-push.
 #
 # Security: this job never checks out or runs PR code. The pull_request_target,
-# workflow_run and check_suite triggers read this file from the default
-# branch, so a PR that edits it is judged by the copy already on main.
+# workflow_run, check_suite and pull_request_review triggers read this file from
+# the default branch, so a PR that edits it is judged by the copy already on main
+# and an approval after the last CI completion re-arms the gate.
 # No ${{ }} expressions inside run: blocks; values reach bash through env.
 name: merge-when-green
 
@@ -43,6 +45,8 @@ on:
     types: [completed]
   check_suite:
     types: [completed]
+  pull_request_review:
+    types: [submitted, dismissed]
 
 permissions:
   contents: read
@@ -65,20 +69,19 @@ jobs:
        github.event.workflow_run.event == 'pull_request' &&
        github.event.workflow_run.head_repository.full_name == github.repository) ||
       (github.event_name == 'check_suite' &&
-       github.event.check_suite.head_repository.full_name == github.repository)
+       github.event.check_suite.head_repository.full_name == github.repository) ||
+      (github.event_name == 'pull_request_review' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      # The ARC runner image ships curl and jq but not gh. Pinned, no sudo.
+      # ubuntu-latest already ships gh, but the pinned download makes the
+      # available version deterministic (pinned digest checked below).
       - name: Install gh
         env:
           GH_VERSION: "2.103.2"
         run: |
           set -euo pipefail
-          if command -v gh >/dev/null 2>&1; then
-            gh --version | head -1
-            exit 0
-          fi
           dest="$RUNNER_TEMP/gh"
           mkdir -p "$dest"
           archive="$dest/gh_${GH_VERSION}_linux_amd64.tar.gz"
@@ -289,5 +292,12 @@ jobs:
             exit 0
           fi
 
-          GH_TOKEN="$GATE_TOKEN" gh pr merge "$PR" --repo "$GH_REPO" --squash --match-head-commit "$SHA"
+          # The PR body is the squash body. Without --body, `Closes #N` inside a
+          # commit bullet is not a standalone keyword and the issue stays open.
+          PR_BODY=$(jq -r '.body // ""' <<<"$META")
+          if [[ -n "$PR_BODY" ]]; then
+            GH_TOKEN="$GATE_TOKEN" gh pr merge "$PR" --repo "$GH_REPO" --squash --match-head-commit "$SHA" --body "$PR_BODY"
+          else
+            GH_TOKEN="$GATE_TOKEN" gh pr merge "$PR" --repo "$GH_REPO" --squash --match-head-commit "$SHA"
+          fi
           note "squash-merged #$PR at $SHA."
